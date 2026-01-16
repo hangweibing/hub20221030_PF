@@ -51,12 +51,11 @@ r = 3;                               % 圆角半径 (mm)
 % 条件：无最小y位置且末端z坐标≤35
 % 物理意义：裂纹处于初始阶段，主要在直线区域扩展
 if(isempty(minYloca) && zNewSet(end) <= 35)
-    % 首先调整起始点到下边界
-    yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap'); % 基于z坐标插值调整y值到下边界
-    zNewSet(1) = 30;  % 固定起始z坐标到下边界
+    % yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap'); % 基于z坐标插值调整y值到下边界
+    zNewSet(1) = 30;  % 直接投影坐标，不插值
 
     % 调整末端点到上边界
-    zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], 13, 'linear', 'extrap'); % 基于y坐标插值调整z值
+    % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], 13, 'linear', 'extrap'); % 基于y坐标插值调整z值
     yNewSet(end) = 13;  % 固定末端y坐标到上边界
 
 %% 分支2：第一阶段实际分支 - 包含内部拐点，直线到直线
@@ -70,7 +69,7 @@ elseif(~isempty(minYloca) && zNewSet(end) <= 35)
     % 重构z坐标数组，从新的起始点开始
     zNewSet = [newZstart, zNewSet(lastIndex+1:end)];
     % 调整末端点到上边界
-    yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up');
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
     % 重构y坐标数组，从y=7开始
     yNewSet = [7, yNewSet(lastIndex+1:end)];
 
@@ -79,19 +78,11 @@ elseif(~isempty(minYloca) && zNewSet(end) <= 35)
 % 物理意义：裂纹扩展到圆角过渡区域
 elseif(isempty(minYloca) && (35 < zNewSet(end) && zNewSet(end) < 37.82842712) && zNewSet(1) < 30.5)
     % 调整起始点到下边界
-    yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap');
-    zNewSet(1) = 30;
+    % yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap');
+    zNewSet(1) = 30;  % 直接投影坐标，不插值
 
     % 处理上边界，可能与圆角相交的情况
-    % 计算裂纹末端与上圆角的交点
-    [y_tmp, z_tmp, COMPLEX_SOULTION] = getPointOnCurveFunc([yNewSet(end), zNewSet(end)], [yNewSet(end-1), zNewSet(end-1)], upCenter1, r, 'left');
-
-    if COMPLEX_SOULTION  % 如果没有有效交点
-        yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up');  % 使用上边界函数
-    else
-        yNewSet(end) = y_tmp;  % 使用计算的交点
-        zNewSet(end) = z_tmp;
-    end
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
     % 已注释的备用处理方法
     % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end),'up'), 'linear', 'extrap');
@@ -111,13 +102,12 @@ elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(
         yNewSet = [7, yNewSet(lastIndex+1:end)];
     else
         % 计算新的起始z坐标
-        newZstart = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], 7, 'linear', 'extrap');
-        zNewSet = [newZstart, zNewSet(2:end)];
-        yNewSet = [7, yNewSet(2:end)];
+        % newZstart = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], 7, 'linear', 'extrap');
+        yNewSet = [7, yNewSet(2:end)];% 直接投影，不插值
     end
 
     % 调整末端点到上圆角
-    [yNewSet(end), zNewSet(end)] = getPointOnCurveFunc([yNewSet(end), zNewSet(end)], [yNewSet(end-1), zNewSet(end-1)], upCenter1, r, 'left');
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
     % 检查是否与下圆角相交，如果是则进行前缘分裂处理
     [yNewSet, zNewSet, splitted] = resplit_front(yNewSet, zNewSet, downCenter1, r);
@@ -140,14 +130,13 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712 && zNewSet(1) > 35 && zN
 
     % 如果找到过渡点，调整起始点到圆角边界
     if(newLeftPoint > 0)
-        [yNewStart, zNewStart] = getPointOnCurveFunc([yNewSet(newLeftPoint+1), zNewSet(newLeftPoint+1)], ...
-            [yNewSet(newLeftPoint), zNewSet(newLeftPoint)], downCenter1, r, 'right');
+        [yNewStart, zNewStart] = getEdgeYbyZFunc(zNewSet(newLeftPoint), 'down', yNewSet(newLeftPoint));
         zNewSet = [zNewStart, zNewSet(newLeftPoint+1:end)];
         yNewSet = [yNewStart, yNewSet(newLeftPoint+1:end)];
     end
 
     % 调整末端点到上圆角
-    [yNewSet(end), zNewSet(end)] = getPointOnCurveFunc([yNewSet(end), zNewSet(end)], [yNewSet(end-1), zNewSet(end-1)], upCenter1, r, 'left');
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
     % 已注释的备用处理方法
     % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end),'up'), 'linear', 'extrap');
@@ -166,7 +155,7 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712) && (zNewSet(1) >= 37.82
     end
 
     % 调整末端点到上圆角
-    [yNewSet(end), zNewSet(end)] = getPointOnCurveFunc([yNewSet(end), zNewSet(end)], [yNewSet(end-1), zNewSet(end-1)], upCenter1, r, 'left');
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
     
 %% 分支7：第六阶段 - 从直线到上边界（判断交点）
 % 条件：末端z坐标>37.83，起始z坐标≤35
@@ -179,13 +168,12 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
         zNewSet = [newZstart, zNewSet(lastIndex+1:end)];
         yNewSet = [7, yNewSet(lastIndex+1:end)];
     else
-        newZstart = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], 7, 'linear', 'extrap');
-        zNewSet = [newZstart, zNewSet(2:end)];
-        yNewSet = [7, yNewSet(2:end)];
+        % newZstart = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], 7, 'linear', 'extrap');
+        yNewSet = [7, yNewSet(2:end)];% 直接投影，不插值
     end
 
     % 调整末端点到上边界
-    yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up');
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
     % 检查是否与下圆角相交
     [yNewSet, zNewSet, splitted] = resplit_front(yNewSet, zNewSet, downCenter1, r);
@@ -213,15 +201,14 @@ elseif(zNewSet(end) > 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.8284271
 
     % 调整起始点到圆角边界
     if(newLeftPoint > 0)
-        [yNewStart, zNewStart] = getPointOnCurveFunc([yNewSet(newLeftPoint+1), zNewSet(newLeftPoint+1)], ...
-            [yNewSet(newLeftPoint), zNewSet(newLeftPoint)], downCenter1, r, 'right');
+        [yNewStart, zNewStart] = getEdgeYbyZFunc(zNewSet(newLeftPoint), 'down', yNewSet(newLeftPoint));
         zNewSet = [zNewStart, zNewSet(newLeftPoint+1:end)];
         yNewSet = [yNewStart, yNewSet(newLeftPoint+1:end)];
     end
 
     % 调整末端点到上边界（使用插值方法）
-    zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
-    yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up');
+    % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
     % 已注释的备用起始点处理方法
     % zStartInterp = interp1([yNewSet(2), yNewSet(3)], [zNewSet(2), zNewSet(3)], getEdgeYbyZFunc(zNewSet(1),'down'), 'linear', 'extrap');
@@ -252,14 +239,14 @@ elseif zNewSet(end) > 37.82842712 && zNewSet(1) > 37.82842712  % 20220915 修改
     end
 
     % 调整起始点到下边界
-    zNewSet(1) = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], getEdgeYbyZFunc(zNewSet(1), 'down'), 'linear', 'extrap');
-    yNewSet(1) = getEdgeYbyZFunc(zNewSet(1), 'down');
+    % zNewSet(1) = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], getEdgeYbyZFunc(zNewSet(1), 'down'), 'linear', 'extrap');
+    [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
 
     % 调整末端点到上边界（两种插值方法）
-    zNewSet(end) = interp1([yNewSet(end-2), yNewSet(end-1)], [zNewSet(end-2), zNewSet(end-1)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
+    % zNewSet(end) = interp1([yNewSet(end-2), yNewSet(end-1)], [zNewSet(end-2), zNewSet(end-1)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
     % 最终调整末端点
-    zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
-    yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up');
+    % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
+    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
     % 已注释的调试代码
     % midPointUp = ceil(length(zNewSet)/2);
