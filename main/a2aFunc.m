@@ -2,7 +2,7 @@
 %% 函数名称：a2aFunc
 %% 功能描述：基于POD神经网络模型的裂纹扩展预测核心算法
 %% ===================================================================
-function [yRegSet, zRegSet, SPLITTED, logCstar, gamma] = ...
+function [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaKSet] = ...
          a2aFunc(yRegSet, zRegSet, aver_delta_sigma, m_name, curUinput, curAverInput, logCstar, gamma, step, testErrSet)
 
 %A2AFUNC 基于当前时刻的裂纹状态和对应模型预测下一时刻的裂纹状态
@@ -29,12 +29,9 @@ function [yRegSet, zRegSet, SPLITTED, logCstar, gamma] = ...
 %   SPLITTED:        裂纹是否发生分裂 (0/1)
 %   logCstar:        更新的Paris定律参数 logC*
 %   gamma:           更新的Paris定律参数 γ
+%   deltaKSet:       应力强度因子范围（用于POF计算）
 %
-% 核心技术：
-%   1. POD (Proper Orthogonal Decomposition) 降维
-%   2. 神经网络应力强度因子预测
-%   3. Paris疲劳裂纹扩展定律
-%   4. 几何约束和正则化处理
+
 %% ===================================================================
 %% 参数初始化和预处理
 %% ===================================================================
@@ -152,12 +149,6 @@ zNewSet = zRegSet + zIncrSet;  % 新的z坐标集
 % 根据边界条件调整裂纹形状，同时检测是否发生分裂
 [yNewSet, zNewSet, SPLITTED] = addConstraintNewSatgeFunc(yNewSet, zNewSet);
 
-% 检测复数并可视化（调试用）
-if ~isreal(yNewSet) || ~isreal(zNewSet)
-    warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
-    plotCrackCoordinates(yNewSet, zNewSet, m_name);
-end
-
 % t_constraint_time = toc(t_constraint);  % 性能统计已注释
 
 %% 几何正则化
@@ -171,5 +162,6 @@ end
 %% 输出参数（当前版本保持材料参数不变）
 logCstar = logCstar;  % Paris定律参数logC* (保持不变)
 gamma = gamma;        % Paris定律参数γ (保持不变)
+% deltaKSet 已在第65行计算，作为输出返回用于POF计算
 end
 

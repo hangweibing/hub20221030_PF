@@ -20,7 +20,7 @@ rng(SIM_SEED);    % 设置全局随机数种子
 
 % 基本粒子滤波参数
 n = 1;                                    % 状态向量的维度（每个粒子）
-N = 15000;                                  % 粒子数量
+N = 1000;                                  % 粒子数量
 v_sphere = 2;                             % 一维空间维度参数
 
 % 正则化粒子滤波参数计算
@@ -45,6 +45,12 @@ upcrackparticles = zeros(N, 1000);       % 上表面裂纹粒子
 logCstarparticles = zeros(N, 1000);      % logC*参数粒子
 gammaparticles = zeros(N, 1000);         % gamma参数粒子
 weight = zeros(N, 1000);                 % 粒子权重
+
+% POF计算相关变量
+particles_K_max = zeros(N, 1);          % 每个粒子的最大应力强度因子
+POF_array = zeros(1000, 1);              % 失效概率数组（每个时间步）
+mu_Kc = 33.4 * sqrt(1e3);                            % 断裂韧性均值 (MPa√m)
+std_Kc = 3.34 * sqrt(1e3);                           % 断裂韧性标准差 (MPa√m)
 
 %% ===================================================================
 %% 观测数据配置
@@ -258,7 +264,10 @@ while (m-1)*step/1950.70866 <= t_check(end)
     %% 粒子预测步骤（对每个粒子进行状态更新）
     %% ===================================================================
 
-    parfor (i = 1:N)
+    % 初始化当前时间步的K值存储（parfor兼容）
+    particles_K_max_temp = zeros(N, 1);
+    
+    for (i = 1:N)
         %% 粒子级变量初始化
         curUinput = {};
         curAverInput = {};
@@ -295,7 +304,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
         end
 
         %% ===================================================================
-        %% 智能模型选择和数据配置
+        %% 模型选择
         %% ===================================================================
 
         if SPLITTED && (m_index==3 || m_index==5)
@@ -331,9 +340,12 @@ while (m-1)*step/1950.70866 <= t_check(end)
         % figure; plot_geometry_20; plot(zRegSet, yRegSet); axis equal;
 
         %% 调用预测模型更新粒子状态
-        [yRegSet, zRegSet, SPLITTED, logCstar, gamma] = ...
+        [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaKSet] = ...
             a2aNew(yRegSet, zRegSet, aver_delta_sigma, m_name, ...
                    curUinput, curAverInput, logCstar, gamma, step, testErrSet);
+        
+        %% 存储当前粒子的最大应力强度因子
+        particles_K_max_temp(i) = max(deltaKSet);
 
         %% 更新粒子状态（parfor兼容：直接确保实数）
         % 原方案: xparticle(i, :, m) = [...]; xparticle = real(xparticle);
@@ -342,23 +354,23 @@ while (m-1)*step/1950.70866 <= t_check(end)
         xparticle(i, :, m) = real([yRegSet, zRegSet, logCstar, gamma]);
         SPLITTE_temp(i) = SPLITTED;      % 更新分裂状态
     end
+    
+    % 将parfor循环中的K值复制到主数组
+    particles_K_max = particles_K_max_temp;
 
     %% 计算粒子滤波统计量
     weight(:, m) = 1/N * ones(N, 1);             % 均匀权重初始化
     Xpf(:, m) = (mean(xparticle(:, :, m)))';     % 状态均值估计
     xparticle_cov(:, :, m) = cov(xparticle(:, :, m)); % 状态协方差
+    
+    %% 计算当前时间步的失效概率(POF)
+    try
+        POF_array(m) = calculatePOF(particles_K_max, mu_Kc, std_Kc);
+    catch ME
+        warning('POF计算失败 (时间步 %d): %s', m, ME.message);
+        POF_array(m) = 0;  % 失败时设为0
+    end
 
-    % 220913 已弃用，防止粒子群退化，但会导致去除过多粒子，因此保留所有粒子
-    % tmp_outliner = isoutlier(xparticle(:,42,m));
-    % if sum(tmp_outliner)~=0
-    %     tmp_normal_particles=xparticle(~tmp_outliner,:,m);
-    %     for k =1:N
-    %         if tmp_outliner(k)==1
-    %             tmp_sel=randi([1,size(tmp_normal_particles,1)],1,1);
-    %             xparticle(k,:,m)=tmp_normal_particles(tmp_sel,:);
-    %         end
-    %     end
-    % end
 
     %% 提取关键参数的历史记录
     upcrackparticles(:, m) = xparticle(:, 42, m);    % 上表面裂纹长度
@@ -447,14 +459,15 @@ end
 t_check = [5.8741E+01 1.3869E+02  2.1810E+02 2.4204E+02 2.8120E+02];
 z       = [2.4882E+00 4.0190E+00  1.3130E+01 1.6057E+01 2.0226E+01] + 30;
 
-%% 绘制结果
+%% 绘制结果 - 裂纹长度图
+figure(1);
 plot(t_check, z-30, '^', 'linewidth', 5); hold on
 plot(x, y_3, 'b', 'linewidth', 5); hold on;
 plot(x, y_1, 'r--', 'linewidth', 5); hold on
 plot(x, y_2, 'r--', 'linewidth', 5); hold off;
 
 
-%% 图表格式设置
+%% 图表格式设置 - 裂纹长度图
 xlabel('Flight hours/h', 'FontSize', 30);
 ylabel('Surface crack length/mm', 'FontSize', 30);
 set(get(gca, 'xlabel'), 'fontname', 'Times New Roman');
@@ -470,306 +483,35 @@ legend('Location', 'best');
 % 网格设置
 grid on;
 set(gca, 'gridlinestyle', ':', 'gridcolor', 'k');
-% axis([0,300,1,21]);
-% t_check=[5.8741E+01 9.9534E+01 1.3869E+02 171.873 1.8275E+02 203.419 2.1810E+02 2.4204E+02 2.8120E+02 3.1546E+02 3.4375E+02 3.8182E+02];
-% z=[2.4882E+00 2.9894E+00 4.0190E+00 5.46751 7.2212E+00 10.4231 1.3130E+01 1.6057E+01 2.0226E+01 2.1715E+01 2.2903E+01 2.3452E+01]+30;
-% plot(t_check,z-30,'v','linewidth',5);hold on
-% 
-% figure
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,1));plot(XI_ksdensity,F_ksdensity,'Color',[0.5 0.5 0.5],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,158));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,216));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,294));plot(XI_ksdensity,F_ksdensity,'b-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,353));plot(XI_ksdensity,F_ksdensity,'b-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,m-1));plot(XI_ksdensity,F_ksdensity,'r-.','LineWidth',5);hold on
-% % [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,588));plot(XI_ksdensity,F_ksdensity,'r-','LineWidth',5);hold off
-% xlabel('logC','FontSize',40);
-% ylabel('PDF','FontSize',40);
-% set(get(gca,'xlabel'),'fontweight','bold');
-% set(get(gca,'ylabel'),'fontweight','bold');
-% set(get(gca,'xlabel'),'fontname','Times New Roman');
-% set(get(gca,'ylabel'),'fontname','Times New Roman');
-% set(gca,'fontname','Times New Roman');
-% set(gca,'FontSize',30);
-% legend('   Prior','   Inspection 1','   Inspection 2','   Inspection 3','   Inspection 4','   Inspection 5','   Inspection 6','FontSize',30);
-% legend('Location','best');
-% legend('boxoff')
-% % axis([-10.94,-10.76,0,60]);
-% 
-% figure
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,1));plot(XI_ksdensity,F_ksdensity,'Color',[0.5 0.5 0.5],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,158));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,216));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,294));plot(XI_ksdensity,F_ksdensity,'b-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,353));plot(XI_ksdensity,F_ksdensity,'b-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,m-1));plot(XI_ksdensity,F_ksdensity,'r-.','LineWidth',5);hold on
-% % [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,588));plot(XI_ksdensity,F_ksdensity,'r-','LineWidth',5);hold off
-% xlabel('\gamma','FontSize',30);
-% set(get(gca,'xlabel'),'fontweight','bold');
-% ylabel('PDF','FontSize',30);
-% set(get(gca,'xlabel'),'fontname','Times New Roman');
-% set(get(gca,'ylabel'),'fontname','Times New Roman');
-% set(gca,'fontname','Times New Roman');
-% set(gca,'FontSize',30);
-% legend('   Prior','   Inspection 1','   Inspection 2','   Inspection 3','   Inspection 4','   Inspection 5','   Inspection 6','FontSize',30);
-% legend('Location','best');
-% legend('boxoff')
-% % axis([2.85,3.12,0,190]);
 
-%%
-% % regularized particle filter
-% for m=2:1850       %��ǰԤ��
-%     xparticlem_1=xparticle(:,:,m-1);
-%     aver_delta_sigma=aver_delta_sigma_set(m-1);
-%     parfor i=1:N
-%         curModel={};
-%         curUinput={};
-%         curAverInput={};
-%         SPLITTED=SPLITTE_temp(i);
-%         xparticlei=xparticlem_1(i,:);
-%         a_up=xparticlei(42)-30;
-%         a_down=xparticlei(22)-30;
-%         m_index = getModelIndexFunc(a_up,a_down); % �ж����ƽ׶�
-%         if ~SPLITTED % ���ǰԵδ���룬���������ƴ���ģ�ͼ�����ȡ����ģ��
-%             curModel=model_integrated{m_index};
-%             curUinput=Uinput_integrated{m_index};
-%             curAverInput=averInput_integrated{m_index};
-%         else % ���ǰԵ�ѷ��룬�ӷ������ƴ���ģ�ͼ�����ȡ����ģ��
-%             if m_index==3
-%                 curModel=model_splitted{1};
-%                 curUinput=Uinput_splitted{1};
-%                 curAverInput=averInput_splitted{1};
-%             elseif m_index==5
-%                 curModel=model_splitted{2};
-%                 curUinput=Uinput_splitted{2};
-%                 curAverInput=averInput_splitted{2};
-%             end
-%         end
-%         yRegSet=xparticlei(1:21);
-%         zRegSet=xparticlei(22:42);
-%         logCstar=xparticlei(43);
-%         gamma=xparticlei(44);
-%         [yRegSet,zRegSet,SPLITTED,logCstar,gamma] = a2aFunc(yRegSet,zRegSet,aver_delta_sigma,curModel,curUinput,curAverInput,logCstar,gamma,step);
-%         xparticle(i,:,m)=[yRegSet,zRegSet,logCstar,gamma];
-%         SPLITTE_temp(i)=SPLITTED;
-%     end
-%     disp(m)
-%     weight(:,m)=1/N*ones(N,1);
-%     Xpf(:,m)=(mean(xparticle(:,:,m)))';
-%     xparticle_cov(:,:,m)=cov(xparticle(:,:,m));
-%     upcrackparticles(:,m)=xparticle(:,42,m);
-%     logCstarparticles(:,m)=xparticle(:,43,m);
-%     gammaparticles(:,m)=xparticle(:,44,m);
-% end
-% parfor i=1:N   %�������
-%     zPred(i)=upcrackparticles(i,117);
-%     z1(i)=z(1)-zPred(i);
-%     weight(i,117)=inv(sqrt(2*pi*det(R)))*exp(-0.5*(z1(i))*inv(R)*(z1(i))')+1e-99;
-% end
-% weight(:,117)=weight(:,117)./sum(weight(:,117));
-% Xpf(:,117)=0;
-% for i=1:N
-%     Xpf(:,117)=Xpf(:,117)+(weight(i,117)*xparticle(i,:,117))';
-% end
-% xparticle_cov(:,:,117)=0;
-% for i=1:N
-%     xparticle_cov(:,:,117)=xparticle_cov(:,:,117)+weight(i,117)*(xparticle(i,:,117)'-Xpf(:,117))*(xparticle(i,:,117)'-Xpf(:,117))';
-% end
-% for i=1:44
-%     D(i,117)=sqrt(xparticle_cov(i,i,117));
-%     e(:,i,117)=kernelsampling(N)';
-% end
-% outindex=randomr(weight(:,117));
-% xparticle1(:,:,117)=xparticle(outindex,:,117);                                 %�ز���
-% for i=1:44
-%     xparticle(:,i,117)=xparticle1(:,i,117)+h*D(i,117)*e(:,i,117);              %����
-%     xparticle(:,i,117)=rearrange(xparticle(:,i,117),xparticle1(:,i,117))';     %�μ����ס�Dynamic Bayesian Network for Aircraft Wing Health Monitoring Digital Twin��
-% end
-% for i=1:N
-%     [yNewSet,zNewSet,SPLITTE_temp(i)]=addConstraintNewSatgeFunc(xparticle(i,1:21,117),xparticle(i,22:42,117));
-%     [xparticle(i,1:21,117),xparticle(i,22:42,117),~] = crackRegular5Func(yNewSet,zNewSet,nRegPoint,'false');
-% end
-% 
-% %�ڶ����غ���
-% for m=2:81       %��ǰԤ��
-%     xparticlem_1=xparticle(:,:,m+115);
-%     aver_delta_sigma=aver_delta_sigma_set2(m-1);
-%     M=m+116;
-%     parfor i=1:N
-%         curModel={};
-%         curUinput={};
-%         curAverInput={};
-%         SPLITTED=SPLITTE_temp(i);
-%         xparticlei=xparticlem_1(i,:);
-%         a_up=xparticlei(42)-30;
-%         a_down=xparticlei(22)-30;
-%         m_index = getModelIndexFunc(a_up,a_down); % �ж����ƽ׶�
-%         if ~SPLITTED % ���ǰԵδ���룬���������ƴ���ģ�ͼ�����ȡ����ģ��
-%             curModel=model_integrated{m_index};
-%             curUinput=Uinput_integrated{m_index};
-%             curAverInput=averInput_integrated{m_index};
-%         else % ���ǰԵ�ѷ��룬�ӷ������ƴ���ģ�ͼ�����ȡ����ģ��
-%             if m_index==3
-%                 curModel=model_splitted{1};
-%                 curUinput=Uinput_splitted{1};
-%                 curAverInput=averInput_splitted{1};
-%             elseif m_index==5
-%                 curModel=model_splitted{2};
-%                 curUinput=Uinput_splitted{2};
-%                 curAverInput=averInput_splitted{2};
-%             end
-%         end
-%         yRegSet=xparticlei(1:21);
-%         zRegSet=xparticlei(22:42);
-%         logCstar=xparticlei(43);
-%         gamma=xparticlei(44);
-%         [yRegSet,zRegSet,SPLITTED,logCstar,gamma] = a2aFunc(yRegSet,zRegSet,aver_delta_sigma,curModel,curUinput,curAverInput,logCstar,gamma,step);
-%         xparticle(i,:,M)=[yRegSet,zRegSet,logCstar,gamma];
-%         SPLITTE_temp(i)=SPLITTED;
-%     end
-%     m/81
-%     2
-%     weight(:,M)=1/N*ones(N,1);
-%     Xpf(:,M)=(mean(xparticle(:,:,M)))';
-%     xparticle_cov(:,:,M)=cov(xparticle(:,:,M));
-%     upcrackparticles(:,M)=xparticle(:,42,M);
-%     logCstarparticles(:,M)=xparticle(:,43,M);
-%     gammaparticles(:,M)=xparticle(:,44,M);
-% end
-% parfor i=1:N   %�������
-%     zPred(i)=upcrackparticles(i,197);
-%     z1(i)=z(2)-zPred(i);
-%     weight(i,197)=inv(sqrt(2*pi*det(R)))*exp(-0.5*(z1(i))*inv(R)*(z1(i))')+1e-99;
-% end
-% weight(:,197)=weight(:,197)./sum(weight(:,197));
-% Xpf(:,197)=0;
-% for i=1:N
-%     Xpf(:,197)=Xpf(:,197)+(weight(i,197)*xparticle(i,:,197))';
-% end
-% xparticle_cov(:,:,197)=0;
-% for i=1:N
-%     xparticle_cov(:,:,197)=xparticle_cov(:,:,197)+weight(i,197)*(xparticle(i,:,197)'-Xpf(:,197))*(xparticle(i,:,197)'-Xpf(:,197))';
-% end
-% for i=1:44
-%     D(i,197)=sqrt(xparticle_cov(i,i,197));
-%     e(:,i,197)=kernelsampling(N)';
-% end
-% outindex=randomr(weight(:,197));
-% xparticle1(:,:,197)=xparticle(outindex,:,197);                             %�ز���
-% for i=1:44
-%     xparticle(:,i,197)=xparticle1(:,i,197)+h*D(i,197)*e(:,i,197);          %����
-%     xparticle(:,i,197)=rearrange(xparticle(:,i,197),xparticle1(:,i,197))'; %�μ����ס�Dynamic Bayesian Network for Aircraft Wing Health Monitoring Digital Twin��
-% end
-% for i=1:N
-%     [yNewSet,zNewSet,SPLITTE_temp(i)]=addConstraintNewSatgeFunc(xparticle(i,1:21,197),xparticle(i,22:42,197));
-%     [xparticle(i,1:21,197),xparticle(i,22:42,197),~] = crackRegular5Func(yNewSet,zNewSet,nRegPoint,'false');
-% end
-% 
-% 
-% % %% post processing
-% % close all;clc;clear all;load('hub20211123.mat')
-% %
-% % logCstar_post_Estimation=[Xpf(43,117) Xpf(43,197) Xpf(43,274) Xpf(43,338) Xpf(43,360)];
-% % gamma_post_Estimation=[Xpf(44,117) Xpf(44,197) Xpf(44,274) Xpf(44,338) Xpf(44,360)];
-% clc;figure
-% % [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,1));plot(XI_ksdensity,F_ksdensity,'LineWidth',2);hold on
-% plot([sort(xparticle(:,43,1));-10.8],[0 ones(1,(length(xparticle(:,43,1))-1)).*10 0],'Color',[0.5 0.5 0.5],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,117));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,197));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,274));plot(XI_ksdensity,F_ksdensity,'b-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,338));plot(XI_ksdensity,F_ksdensity,'b-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,43,360));plot(XI_ksdensity,F_ksdensity,'r-','LineWidth',5);hold off
-% xlabel('logC','FontSize',40);
-% ylabel('PDF','FontSize',40);
-% % set(get(gca,'xlabel'),'fontweight','bold');
-% % set(get(gca,'ylabel'),'fontweight','bold');
-% set(get(gca,'xlabel'),'fontname','Times New Roman');
-% set(get(gca,'ylabel'),'fontname','Times New Roman');
-% set(gca,'fontname','Times New Roman');
-% set(gca,'FontSize',30);
-% legend('   Prior','   t = 59.39h','   t = 100.34h','   t = 139.59h','   t = 172.35h','   t = 183.62h','FontSize',30);
-% legend('Location','best');
-% legend('boxoff')
-% axis([-10.94,-10.76,0,60]);
-% %2.4882E+00
-% 
-% figure
-% plot(sort(xparticle(:,44,1)),[0 ones(1,(length(xparticle(:,44,1))-2)).*5 0],'Color',[0.5 0.5 0.5],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,117));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,197));plot(XI_ksdensity,F_ksdensity,'Color',[0 0 0],'LineStyle','-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,274));plot(XI_ksdensity,F_ksdensity,'b-.','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,338));plot(XI_ksdensity,F_ksdensity,'b-','LineWidth',5);hold on
-% [F_ksdensity,XI_ksdensity]=ksdensity(xparticle(:,44,360));plot(XI_ksdensity,F_ksdensity,'r-','LineWidth',5);hold off
-% xlabel('\gamma','FontSize',30);
-% set(get(gca,'xlabel'),'fontweight','bold');
-% ylabel('PDF','FontSize',30);
-% set(get(gca,'xlabel'),'fontname','Times New Roman');
-% set(get(gca,'ylabel'),'fontname','Times New Roman');
-% set(gca,'fontname','Times New Roman');
-% set(gca,'FontSize',30);
-% legend('   Prior','   t = 59.39h','   t = 100.34h','   t = 139.59h','   t = 172.35h','   t = 183.62h','FontSize',30);
-% legend('Location','best');
-% legend('boxoff')
-% axis([2.85,3.12,0,190]);
-% % figure(3)
-% % hist(RUL,10)
-% % legend('RUL2','FontSize',20);
-% %
-% figure
-% timeSeries_1=zeros(1,ceil((length(spectra1))/2/step));
-% for i=1:floor((length(spectra1))/2/step)
-%     timeSeries_1(i)=i*step/1950.70866;
-% end
-% timeSeries_1(end)=t_check(1);
-% 
-% % timeSeries_2=zeros(1,ceil((length(spectra2))/2/step));
-% % for i=1:floor((length(spectra2))/2/step)
-% %     timeSeries_2(i)=t_check(1)+i*step/1950.70866;
-% % end
-% % timeSeries_2(end)=t_check(2);
-% % 
-% % timeSeries_3=zeros(1,ceil((length(spectra3))/2/step));
-% % for i=1:floor((length(spectra3))/2/step)
-% %     timeSeries_3(i)=t_check(2)+i*step/1950.70866;
-% % end
-% % timeSeries_3(end)=t_check(3);
-% % 
-% % timeSeries_4=zeros(1,ceil((length(spectra4))/2/step));
-% % for i=1:floor((length(spectra4))/2/step)
-% %     timeSeries_4(i)=t_check(3)+i*step/1950.70866;
-% % end
-% % timeSeries_4(end)=t_check(4);
-% % 
-% % timeSeries_5=zeros(1,ceil((length(spectra5))/2/step));
-% % for i=1:floor((length(spectra5))/2/
-% t=[0 timeSeries_1];
-% 
-% clear x y y1 y2
-% for i=1:321
-%     x(i)=t(i);
-%     %     y(i)=prctile(upcrackparticles(:,i),50);
-%     y(i)=Xpf(42,i)-30;
-% end
-% plot(x,y,'b','linewidth',5);hold on
-% for i=1:321
-%     x(i)=t(i);
-%     y1(i)=prctile(upcrackparticles(:,i),97.5)-30;
-% end
-% plot(x,y1,'r--','linewidth',5);hold on
-% for i=1:321
-%     x(i)=t(i);
-%     y2(i)=prctile(upcrackparticles(:,i),2.5)-30;
-% end
-% plot(x,y2,'r--','linewidth',5);
-% 
-% xlabel('Flight hours/h','FontSize',30);
-% ylabel('Surface crack length/mm','FontSize',30);
-% set(get(gca,'xlabel'),'fontname','Times New Roman');
-% set(get(gca,'ylabel'),'fontname','Times New Roman');
-% set(gca,'fontname','Times New Roman');
-% set(gca,'FontSize',30);
-% legend('   Prediction mean', '   95% bounds','FontSize',30);
-% legend('boxoff')
-% legend('Location','North');
-% grid on;
-% set(gca,'gridlinestyle',':','gridcolor','k');
+%% 绘制结果 - 失效概率(POF)变化图
+figure(2);
+% 提取有效的时间步和POF值
+x_pof = x(1:m-1);
+pof_valid = POF_array(1:m-1);
+
+% 绘制POF曲线
+semilogy(x_pof, pof_valid, 'b-', 'linewidth', 3); hold on;
+
+% 绘制临界POF线（10^-7）
+critical_POF = 1e-7;
+semilogy([x_pof(1), x_pof(end)], [critical_POF, critical_POF], 'r--', 'linewidth', 2);
+hold off;
+
+% 图表格式设置
+xlabel('Flight hours/h', 'FontSize', 30);
+ylabel('Probability of Failure (POF)', 'FontSize', 30);
+set(get(gca, 'xlabel'), 'fontname', 'Times New Roman');
+set(get(gca, 'ylabel'), 'fontname', 'Times New Roman');
+set(gca, 'fontname', 'Times New Roman');
+set(gca, 'FontSize', 40);
+
+% 图例设置
+legend('   POF', '   Critical POF (10^{-7})', 'FontSize', 40);
+legend('boxoff')
+legend('Location', 'best');
+
+% 网格设置
+grid on;
+set(gca, 'gridlinestyle', ':', 'gridcolor', 'k');
+set(gca, 'YScale', 'log');  % 确保使用对数坐标
