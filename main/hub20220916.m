@@ -20,7 +20,7 @@ rng(SIM_SEED);    % 设置全局随机数种子
 
 % 基本粒子滤波参数
 n = 1;                                    % 状态向量的维度（每个粒子）
-N = 1000;                                  % 粒子数量
+N = 15000;                                  % 粒子数量
 v_sphere = 2;                             % 一维空间维度参数
 
 % 正则化粒子滤波参数计算
@@ -244,7 +244,9 @@ averInput_splitted_2 = averInput_splitted{2};
 %% 主时间推进循环
 %% ===================================================================
 
+total_tic = tic;  % 初始化总耗时计时器
 while (m-1)*step/1950.70866 <= t_check(end)
+    iter_tic = tic;  % 初始化当前步耗时计时器
     %% 时间步数据准备
     % 获取上一时刻的所有粒子状态
     xparticlem_1 = xparticle(:, :, m-1);
@@ -414,7 +416,14 @@ while (m-1)*step/1950.70866 <= t_check(end)
     end
 
     m = m + 1;  % 时间步递增
-    disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测']);
+    
+    % 计算耗时
+    iter_time = toc(iter_tic);
+    total_time = toc(total_tic);
+    
+    disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测', ...
+          '，当前步耗时：' num2str(iter_time, '%.2f') 's', ...
+          '，累计总耗时：' num2str(total_time, '%.2f') 's']);
 end
 
 %% ===================================================================

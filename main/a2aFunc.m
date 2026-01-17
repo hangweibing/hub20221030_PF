@@ -151,6 +151,13 @@ zNewSet = zRegSet + zIncrSet;  % 新的z坐标集
 % t_constraint = tic;  % 性能统计已注释
 % 根据边界条件调整裂纹形状，同时检测是否发生分裂
 [yNewSet, zNewSet, SPLITTED] = addConstraintNewSatgeFunc(yNewSet, zNewSet);
+
+% 检测复数并可视化（调试用）
+if ~isreal(yNewSet) || ~isreal(zNewSet)
+    warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
+    plotCrackCoordinates(yNewSet, zNewSet, m_name);
+end
+
 % t_constraint_time = toc(t_constraint);  % 性能统计已注释
 
 %% 几何正则化
@@ -160,44 +167,6 @@ zNewSet = zRegSet + zIncrSet;  % 新的z坐标集
 [yRegSet, zRegSet, ~, SPLITTED] = crackRegular5Func(yNewSet, zNewSet, nRegPoint, 'false');
 % t_regular_time = toc(t_regular);  % 性能统计已注释
 
-%% 性能分析统计（已注释）
-% persistent call_count t_pod_sum t_nn_sum t_paris_sum t_small_sum t_normal_sum t_coord_sum t_constraint_sum t_regular_sum;
-% if isempty(call_count)
-%     call_count = 0;
-%     t_pod_sum = 0;
-%     t_nn_sum = 0;
-%     t_paris_sum = 0;
-%     t_small_sum = 0;
-%     t_normal_sum = 0;
-%     t_coord_sum = 0;
-%     t_constraint_sum = 0;
-%     t_regular_sum = 0;
-% end
-
-% call_count = call_count + 1;
-% t_pod_sum = t_pod_sum + t_pod_time;
-% t_nn_sum = t_nn_sum + t_nn_time;
-% t_paris_sum = t_paris_sum + t_paris_time;
-% t_small_sum = t_small_sum + t_small_crack_time;
-% t_normal_sum = t_normal_sum + t_normal_time;
-% t_coord_sum = t_coord_sum + t_coord_update_time;
-% t_constraint_sum = t_constraint_sum + t_constraint_time;
-% t_regular_sum = t_regular_sum + t_regular_time;
-
-% if mod(call_count, 100) == 0
-%     t_total_avg = (t_pod_sum + t_nn_sum + t_paris_sum + t_small_sum + t_normal_sum + t_coord_sum + t_constraint_sum + t_regular_sum) / call_count;
-%     fprintf('\n================ a2aFunc性能分析 (前%d次调用平均) ================\n', call_count);
-%     fprintf('[1] POD降维投影:      %.4f 秒 (%.1f%%)\n', t_pod_sum/call_count, 100*t_pod_sum/(call_count*t_total_avg));
-%     fprintf('[2] 神经网络预测:      %.4f 秒 (%.1f%%)\n', t_nn_sum/call_count, 100*t_nn_sum/(call_count*t_total_avg));
-%     fprintf('[3] Paris定律计算:     %.4f 秒 (%.1f%%)\n', t_paris_sum/call_count, 100*t_paris_sum/(call_count*t_total_avg));
-%     fprintf('[4] 小裂纹处理:        %.4f 秒 (%.1f%%)\n', t_small_sum/call_count, 100*t_small_sum/(call_count*t_total_avg));
-%     fprintf('[5] 法向量计算:        %.4f 秒 (%.1f%%)\n', t_normal_sum/call_count, 100*t_normal_sum/(call_count*t_total_avg));
-%     fprintf('[6] 坐标更新:          %.4f 秒 (%.1f%%)\n', t_coord_sum/call_count, 100*t_coord_sum/(call_count*t_total_avg));
-%     fprintf('[7] 边界约束处理:      %.4f 秒 (%.1f%%)\n', t_constraint_sum/call_count, 100*t_constraint_sum/(call_count*t_total_avg));
-%     fprintf('[8] 几何正则化:        %.4f 秒 (%.1f%%)\n', t_regular_sum/call_count, 100*t_regular_sum/(call_count*t_total_avg));
-%     fprintf('【总计】 平均每次调用: %.4f 秒\n', t_total_avg);
-%     fprintf('==================================================================\n\n');
-% end
 
 %% 输出参数（当前版本保持材料参数不变）
 logCstar = logCstar;  % Paris定律参数logC* (保持不变)
