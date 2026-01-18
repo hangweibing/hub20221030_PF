@@ -130,6 +130,12 @@ normalNormalizeVectorSet = CalNormalVector(yRegSet, zRegSet, ksiRegSet);
 % 计算每个节点的法向量，用于确定裂纹扩展的方向
 % t_normal_time = toc(t_normal);  % 性能统计已注释
 
+%% 检查法向量是否包含复数
+if ~isreal(normalNormalizeVectorSet)
+    warning('法向量计算产生复数！输入坐标可能包含复数或数值不稳定。');
+    normalNormalizeVectorSet
+end
+
 %% 计算坐标增量
 % t_coord_update = tic;  % 性能统计已注释
 yIncrSet = da .* normalNormalizeVectorSet(1, :);  % y方向增量

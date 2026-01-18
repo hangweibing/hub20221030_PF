@@ -113,12 +113,12 @@ elseif(isempty(minYloca) && (35 < zNewSet(end) && zNewSet(end) < 37.82842712) &&
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 3');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 
     % 已注释的备用处理方法
@@ -152,12 +152,12 @@ elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 4');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
     
 %% 分支5：第四阶段 - 圆角到圆角
@@ -189,12 +189,12 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712 && zNewSet(1) > 35 && zN
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 5');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 
     % 已注释的备用处理方法
@@ -219,12 +219,12 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712) && (zNewSet(1) >= 37.82
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 6');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
     
 %% 分支7：第六阶段 - 从直线到上边界（判断交点）
@@ -251,12 +251,12 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 7');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 
     % 已注释的备用处理方法
@@ -294,12 +294,12 @@ elseif(zNewSet(end) > 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.8284271
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 8');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 
     % 已注释的备用起始点处理方法
@@ -343,12 +343,12 @@ elseif zNewSet(end) > 37.82842712 && zNewSet(1) > 37.82842712  % 20220915 修改
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 9');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 
     % 已注释的调试代码
@@ -367,12 +367,12 @@ else
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Default Branch');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 end
 

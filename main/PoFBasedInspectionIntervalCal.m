@@ -115,11 +115,11 @@ for i = 1:N
     gamma = xparticlei(44);
 
     % 调用裂纹扩展预测函数
-    [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaK_temp] = ...
+    [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaK] = ...
         a2aNew(yRegSet, zRegSet, aver_delta_sigma, m_name, curUinput, curAverInput, logCstar, gamma, step, testErrSet);
 
-    % 存储应力强度因子增量（取各节点中的最大值）
-    deltaKSet(i) = max(deltaK_temp);
+    % 存储应力强度因子增量
+    deltaKSet(i) = deltaK;
 end
 
 %% ===================================================================
@@ -219,7 +219,7 @@ while PoFSet(end) < 10^(-7)
         gamma = xparticlei(44);
 
         % 调用裂纹扩展预测函数
-        [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaK_temp] = ...
+        [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaK] = ...
             a2aNew(yRegSet, zRegSet, aver_delta_sigma, m_name, curUinput, curAverInput, logCstar, gamma, step, testErrSet);
 
         % 更新粒子状态（取实部）
@@ -228,8 +228,8 @@ while PoFSet(end) < 10^(-7)
         % 更新分离标志
         SPLITTE_temp(i) = SPLITTED;
 
-        % 存储应力强度因子增量（取各节点中的最大值）
-        deltaKSet(i) = max(deltaK_temp);
+        % 存储应力强度因子增量
+        deltaKSet(i) = deltaK;
     end
 
     %% ===================================================================
