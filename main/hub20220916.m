@@ -267,7 +267,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     % 初始化当前时间步的K值存储（parfor兼容）
     particles_K_max_temp = zeros(N, 1);
     
-    for (i = 1:N)
+    parfor (i = 1:N)
         %% 粒子级变量初始化
         curUinput = {};
         curAverInput = {};
@@ -344,8 +344,8 @@ while (m-1)*step/1950.70866 <= t_check(end)
             a2aNew(yRegSet, zRegSet, aver_delta_sigma, m_name, ...
                    curUinput, curAverInput, logCstar, gamma, step, testErrSet);
         
-        %% 存储当前粒子的最大应力强度因子
-        particles_K_max_temp(i) = max(deltaKSet);
+        %% 存储当前粒子的95%分位数应力强度因子
+        particles_K_max_temp(i) = prctile(deltaKSet, 95);
 
         %% 更新粒子状态（parfor兼容：直接确保实数）
         % 原方案: xparticle(i, :, m) = [...]; xparticle = real(xparticle);

@@ -7,6 +7,11 @@ function [yNewSet, zNewSet, splitted] = addConstraintNewSatgeFunc(yNewSet, zNewS
 % 保存原始数据用于调试
 origy = yNewSet;
 origz = zNewSet;
+if ~isreal(origy) || ~isreal(origz)
+    warning('检测到复数坐标：origy 或 origz 包含复数');
+    origy
+    origz
+end
 
 % =========================================================================
 % 输入参数：
@@ -51,9 +56,7 @@ r = 3;                               % 圆角半径 (mm)
 %% 几何约束处理分支 - 根据裂纹位置和形状应用不同的约束规则
 %% ===================================================================
 
-%% 分支1：第一阶段 - 直线到上边界
-% 条件：无最小y位置且末端z坐标≤35
-% 物理意义：裂纹处于初始阶段，主要在直线区域扩展
+%% 分支1：
 if(isempty(minYloca) && zNewSet(end) <= 35)
     % yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap'); % 基于z坐标插值调整y值到下边界
     zNewSet(1) = 30;  % 直接投影坐标，不插值
@@ -65,17 +68,15 @@ if(isempty(minYloca) && zNewSet(end) <= 35)
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 1');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 
-%% 分支2：第一阶段实际分支 - 包含内部拐点，直线到直线
-% 条件：存在最小y位置且末端z坐标≤35
-% 物理意义：裂纹有内部拐点，从下边界开始向上扩展
+%% 分支2：
 elseif(~isempty(minYloca) && zNewSet(end) <= 35)
     lastIndex = minYloca(end);  % 最后一个最小y位置的索引
     % 计算新的起始z坐标（在y=7处）
@@ -91,17 +92,15 @@ elseif(~isempty(minYloca) && zNewSet(end) <= 35)
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
         plotCrackCoordinates(yNewSet, zNewSet, 'Branch 2');
-        fprintf('--- 原始数据 ---\n');
-        origy
-        origz
-        fprintf('--- 处理后数据 ---\n');
-        yNewSet
-        zNewSet
+        % fprintf('--- 原始数据 ---\n');
+        % origy
+        % origz
+        % fprintf('--- 处理后数据 ---\n');
+        % yNewSet
+        % zNewSet
     end
 
-%% 分支3：第二阶段 - 从下边界到圆角区域
-% 条件：无最小y位置，末端z坐标在(35, 37.83)之间，起始z坐标<30.5
-% 物理意义：裂纹扩展到圆角过渡区域
+%% 分支3：第二阶段
 elseif(isempty(minYloca) && (35 < zNewSet(end) && zNewSet(end) < 37.82842712) && zNewSet(1) < 30.5)
     % 调整起始点到下边界
     % yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap');
@@ -125,9 +124,7 @@ elseif(isempty(minYloca) && (35 < zNewSet(end) && zNewSet(end) < 37.82842712) &&
     % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end),'up'), 'linear', 'extrap');
     % yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up');
 
-%% 分支4：第三阶段 - 从圆角到上边界（判断交点）
-% 条件：(存在最小y位置 或 起始z坐标在(30,35)之间) 且 末端z坐标在(35,37.83]之间
-% 物理意义：裂纹在圆角区域内扩展，可能与下圆角相交
+%% 分支4：
 elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(end)>35) && (zNewSet(end)<=37.82842712)
     % 处理起始点调整
     if ~isempty(minYloca)
@@ -160,9 +157,7 @@ elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(
         % zNewSet
     end
     
-%% 分支5：第四阶段 - 圆角到圆角
-% 条件：起始和末端z坐标都在(35,37.83]之间
-% 物理意义：裂纹完全在圆角区域内扩展
+%% 分支5：
 elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.82842712)
     newLeftPoint = 0;  % 新的左边界点索引
 
@@ -201,9 +196,7 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712 && zNewSet(1) > 35 && zN
     % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end),'up'), 'linear', 'extrap');
     % yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up'); 
 
-%% 分支6：第五阶段 - 从圆角到直线区域（判断交点）
-% 条件：末端z坐标在(35,37.83]之间，起始z坐标≥37.83
-% 物理意义：裂纹从圆角区域扩展到直线区域
+%% 分支6：
 elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712) && (zNewSet(1) >= 37.82842712)
     % 首先清理多余的直线部分
     min_y_loca = find(yNewSet < 9);  % 查找y坐标小于9的位置（接近左边界）
@@ -227,9 +220,7 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712) && (zNewSet(1) >= 37.82
         % zNewSet
     end
     
-%% 分支7：第六阶段 - 从直线到上边界（判断交点）
-% 条件：末端z坐标>37.83，起始z坐标≤35
-% 物理意义：裂纹从下部直线区域扩展到上边界，可能与下圆角相交
+%% 分支7：
 elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
     % 处理起始点调整到左边界
     if ~isempty(minYloca)
@@ -264,9 +255,7 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
     
     
 
-%% 分支8：第七阶段 - 从直线到圆角
-% 条件：末端z坐标>37.83，起始z坐标在(35,37.83]之间
-% 物理意义：裂纹从直线区域进入圆角区域
+%% 分支8：
 elseif(zNewSet(end) > 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.82842712)
     newLeftPoint = 0;  % 新的左边界点
 
@@ -310,9 +299,7 @@ elseif(zNewSet(end) > 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.8284271
     %     zNewSet(1) = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], getEdgeYbyZFunc(zNewSet(1),'down'), 'linear', 'extrap');
     % end
     
-%% 分支9：第八阶段 - 上边界区域（直线到直线）
-% 条件：起始和末端z坐标都>37.83
-% 物理意义：裂纹在上边界直线区域内扩展
+%% 分支9：
 elseif zNewSet(end) > 37.82842712 && zNewSet(1) > 37.82842712  % 20220915 修改：上边界区域的处理
     % 清理左边界多余部分
     min_y_loca = find(yNewSet < 9);  % 查找接近左边界(y<9)的点
