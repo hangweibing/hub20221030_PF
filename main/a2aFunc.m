@@ -2,8 +2,8 @@
 %% 函数名称：a2aFunc
 %% 功能描述：基于POD神经网络模型的裂纹扩展预测核心算法
 %% ===================================================================
-function [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaKSet] = ...
-         a2aFunc(yRegSet, zRegSet, aver_delta_sigma, m_name, curUinput, curAverInput, logCstar, gamma, step, testErrSet)
+function [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
+         a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, m_name, curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet)
 
 %A2AFUNC 基于当前时刻的裂纹状态和对应模型预测下一时刻的裂纹状态
 %
@@ -15,11 +15,14 @@ function [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaKSet] = ...
 %   yRegSet:         当前时刻y坐标集 (21个节点)
 %   zRegSet:         当前时刻z坐标集 (21个节点)
 %   aver_delta_sigma: 平均应力增量 (MPa)
+%   aver_R:           平均应力比 R = Smin/Smax
 %   m_name:          模型名称 (如 'nn_stage3', 'nn_stage5s' 等)
 %   curUinput:       分裂模型的U输入矩阵 (POD基向量)
 %   curAverInput:    分裂模型的平均输入数据
-%   logCstar:        Paris定律参数 logC* (当前值)
-%   gamma:           Paris定律参数 γ (当前值)
+%   logD:            NASGRO(H-S)模型参数 logD (当前值)
+%   A:               NASGRO(H-S)模型参数 A (当前值)
+%   delta_kthr:      NASGRO(H-S)模型参数 delta_kthr (当前值)
+%   p:               NASGRO(H-S)模型参数 p (当前值)
 %   step:            时间步长 (默认值为1)
 %   testErrSet:      测试误差集 (用于模型不确定性)
 %
@@ -27,8 +30,10 @@ function [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaKSet] = ...
 %   yRegSet:         预测的下一时刻y坐标集
 %   zRegSet:         预测的下一时刻z坐标集
 %   SPLITTED:        裂纹是否发生分裂 (0/1)
-%   logCstar:        更新的Paris定律参数 logC*
-%   gamma:           更新的Paris定律参数 γ
+%   logD:            更新的NASGRO(H-S)模型参数 logD
+%   A:               更新的NASGRO(H-S)模型参数 A
+%   delta_kthr:      更新的NASGRO(H-S)模型参数 delta_kthr
+%   p:               更新的NASGRO(H-S)模型参数 p
 %   deltaKSet:       应力强度因子范围（用于POF计算）
 %
 
@@ -37,12 +42,12 @@ function [yRegSet, zRegSet, SPLITTED, logCstar, gamma, deltaKSet] = ...
 %% ===================================================================
 
 % 参数默认值处理
-if nargin <= 8
+if nargin <= 11
     step = 1;  % 默认时间步长
 end
 
 %% 基本参数计算
-Cstar = 10^logCstar;           % Paris定律参数C* (从对数形式转换)
+D = 10^logD;                    % NASGRO(H-S)模型参数D (从对数形式转换)
 nRegPoint = length(yRegSet);   % 裂纹轮廓节点数量
 
 %% ===================================================================
@@ -62,26 +67,42 @@ input = curUinput' * (inputRegSet - curAverInput);  % POD投影，每一列表�
 [deltaKSet] = sim_K_func(m_name, input, aver_delta_sigma, testErrSet);
 % t_nn_time = toc(t_nn);  % 性能统计已注释
 %% ===================================================================
-%% Paris疲劳裂纹扩展定律计算
+%% NASGRO(H-S)疲劳裂纹扩展定律计算
 %% ===================================================================
 
-% t_paris = tic;  % 性能统计已注释
+% t_nasgro = tic;  % 性能统计已注释
 %% 裂纹几何参数计算
 ksiRegSet = linspace(0, 1, nRegPoint);  % 节点参数化坐标 (0~1)
 y_ini = 13;                             % 初始圆心y坐标
 z_ini = 30;                             % 初始圆心z坐标
 a_old = sqrt((yRegSet - y_ini).^2 + (zRegSet - z_ini).^2);  % 当前裂纹尺寸
 
-%% 随机扰动项（考虑材料和环境不确定性）
-variance = 0.1;                         % 扰动方差
-mu = -variance/2;                       % 均值调整（保持期望值为1）
-omega = normrnd(mu, variance, 1, nRegPoint);  % 对数正态随机扰动
-
-%% Paris定律裂纹扩展计算
-% da/dN = C*(ΔK)^γ
+%% NASGRO(H-S)模型裂纹扩展计算
+% da/dN = D * [(ΔK - ΔK_thr) / (1 - K_max/A)^0.5]^p
 % 其中：da-裂纹扩展量，dN-循环次数，ΔK-应力强度因子范围
-da = step * Cstar .* a_old.^(1-gamma/2) .* deltaKSet'.^gamma .* exp(omega);
-% t_paris_time = toc(t_paris);  % 性能统计已注释
+%      K_max = ΔK / (1 - R)，其中R为应力比
+
+% 计算Kmax：Kmax = deltaK / (1 - R)
+% 注意：deltaKSet的单位是MPa√mm，需要转换为MPa√m（除以sqrt(1000)）
+deltaKSet_vec = deltaKSet';  % 转换为行向量
+deltaKSet_m = deltaKSet_vec / sqrt(1000);  % 从mm单位转换为m单位
+Kmax = deltaKSet_m ./ (1 - aver_R);  % Kmax = ΔK / (1 - R)
+
+% 计算分母项：(1 - K_max/A)^0.5，避免负值或零值
+denominator = 1 - Kmax ./ A;
+% 确保分母项为正且不为零（避免数值问题）
+denominator = max(denominator, 1e-10);  % 设置最小值阈值
+denominator = sqrt(denominator);
+
+% 计算分子项：(ΔK - ΔK_thr)，确保非负
+% 注意：delta_kthr的单位是MPa√m，deltaKSet_m也是MPa√m，单位一致
+numerator = deltaKSet_m - delta_kthr;
+numerator = max(numerator, 0);  % 如果ΔK < ΔK_thr，则da = 0
+
+% NASGRO(H-S)模型公式
+da = step * D .* (numerator ./ denominator).^p ;
+da = 1e3 * da; % 单位转换
+
 
 %% ===================================================================
 %% 特殊情况处理：小裂纹的各向同性扩展
@@ -166,8 +187,10 @@ zNewSet = zRegSet + zIncrSet;  % 新的z坐标集
 
 
 %% 输出参数（当前版本保持材料参数不变）
-logCstar = logCstar;  % Paris定律参数logC* (保持不变)
-gamma = gamma;        % Paris定律参数γ (保持不变)
-% deltaKSet 已在第65行计算，作为输出返回用于POF计算
+logD = logD;          % NASGRO(H-S)模型参数logD (保持不变)
+A = A;                % NASGRO(H-S)模型参数A (保持不变)
+delta_kthr = delta_kthr;  % NASGRO(H-S)模型参数delta_kthr (保持不变)
+p = p;                % NASGRO(H-S)模型参数p (保持不变)
+% deltaKSet 已在第62行计算，作为输出返回用于POF计算
 end
 

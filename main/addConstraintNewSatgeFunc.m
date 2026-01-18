@@ -58,12 +58,31 @@ r = 3;                               % 圆角半径 (mm)
 
 %% 分支1：
 if(isempty(minYloca) && zNewSet(end) <= 35)
+    % 清理超过左侧边界(z<30)的点
+    min_z_loca = find(zNewSet < 30);  % 查找超过左侧边界(z<30)的点
+    if ~isempty(min_z_loca)
+        % 保留从最后一个小z值位置到末尾的部分
+        zNewSet = zNewSet(min_z_loca(end):end);
+        yNewSet = yNewSet(min_z_loca(end):end);
+    end
+
     % yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap'); % 基于z坐标插值调整y值到下边界
     zNewSet(1) = 30;  % 直接投影坐标，不插值
 
-    % 调整末端点到上边界
+    % 清理超过上边界(y>13)的点
+    max_y_loca = find(yNewSet > 13);  % 查找超过上边界(y>13)的点
+    if ~isempty(max_y_loca)
+        % 保留从开始到第一个大y值位置的部分
+        zNewSet = zNewSet(1:max_y_loca(1));
+        yNewSet = yNewSet(1:max_y_loca(1));
+    end
+
+    % 调整末端点到上边界（在清理后进行）
     % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], 13, 'linear', 'extrap'); % 基于y坐标插值调整z值
     yNewSet(end) = 13;  % 固定末端y坐标到上边界
+
+    % 确保起始点固定在左边界
+    zNewSet(1) = 30;  % 再次确保起始z坐标在左边界
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -313,8 +332,8 @@ elseif zNewSet(end) > 37.82842712 && zNewSet(1) > 37.82842712  % 20220915 修改
     max_y_loca = find(yNewSet > 11);  % 查找超过右边界(y>11)的点
     if ~isempty(max_y_loca)
         % 保留从开始到第一个大y值位置的部分
-        zNewSet = zNewSet(1:max_y_loca(end));
-        yNewSet = yNewSet(1:max_y_loca(end));
+        zNewSet = zNewSet(1:max_y_loca(1));
+        yNewSet = yNewSet(1:max_y_loca(1));
     end
 
     % 调整起始点到下边界
