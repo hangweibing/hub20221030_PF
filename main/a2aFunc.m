@@ -3,7 +3,7 @@
 %% 功能描述：基于POD神经网络模型的裂纹扩展预测核心算法
 %% ===================================================================
 function [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
-         a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, m_name, curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet)
+         a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, m_name, curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet, particle_idx)
 
 %A2AFUNC 基于当前时刻的裂纹状态和对应模型预测下一时刻的裂纹状态
 %
@@ -50,27 +50,26 @@ end
 D = 10^logD;                    % NASGRO(H-S)模型参数D (从对数形式转换)
 nRegPoint = length(yRegSet);   % 裂纹轮廓节点数量
 
+% 保存最原始的输入坐标，用于边界违规时的对比分析
+yInputSet = yRegSet;
+zInputSet = zRegSet;
+
 %% ===================================================================
 %% POD投影和神经网络预测
 %% ===================================================================
 
 %% POD降维投影
-% t_pod = tic;  % 性能统计已注释
 % 将裂纹几何形状投影到POD基空间进行降维
 inputRegSet = [yRegSet, zRegSet]';  % 组合y和z坐标为输入矩阵
 input = curUinput' * (inputRegSet - curAverInput);  % POD投影，每一列表示一个坐标
-% t_pod_time = toc(t_pod);  % 性能统计已注释
 
 %% 神经网络应力强度因子预测
-% t_nn = tic;  % 性能统计已注释
 % 使用训练好的神经网络模型预测各节点的应力强度因子范围
 [deltaKSet] = sim_K_func(m_name, input, aver_delta_sigma, testErrSet);
-% t_nn_time = toc(t_nn);  % 性能统计已注释
 %% ===================================================================
 %% NASGRO(H-S)疲劳裂纹扩展定律计算
 %% ===================================================================
 
-% t_nasgro = tic;  % 性能统计已注释
 %% 裂纹几何参数计算
 ksiRegSet = linspace(0, 1, nRegPoint);  % 节点参数化坐标 (0~1)
 y_ini = 13;                             % 初始圆心y坐标
@@ -86,7 +85,7 @@ a_old = sqrt((yRegSet - y_ini).^2 + (zRegSet - z_ini).^2);  % 当前裂纹尺寸
 % 注意：deltaKSet的单位是MPa√mm，需要转换为MPa√m（除以sqrt(1000)）
 deltaKSet_vec = deltaKSet';  % 转换为行向量
 deltaKSet_m = deltaKSet_vec / sqrt(1000);  % 从mm单位转换为m单位
-Kmax = deltaKSet_m ./ (1 - aver_R);  % Kmax = ΔK / (1 - R)
+Kmax = deltaKSet_m ./ (1 - aver_R) ;  % Kmax = ΔK / (1 - R)
 
 % 计算分母项：(1 - K_max/A)^0.5，避免负值或零值
 denominator = 1 - Kmax ./ A;
@@ -151,12 +150,6 @@ normalNormalizeVectorSet = CalNormalVector(yRegSet, zRegSet, ksiRegSet);
 % 计算每个节点的法向量，用于确定裂纹扩展的方向
 % t_normal_time = toc(t_normal);  % 性能统计已注释
 
-%% 检查法向量是否包含复数
-if ~isreal(normalNormalizeVectorSet)
-    warning('法向量计算产生复数！输入坐标可能包含复数或数值不稳定。');
-    normalNormalizeVectorSet
-end
-
 %% 计算坐标增量
 % t_coord_update = tic;  % 性能统计已注释
 yIncrSet = da .* normalNormalizeVectorSet(1, :);  % y方向增量
@@ -167,23 +160,60 @@ yNewSet = yRegSet + yIncrSet;  % 新的y坐标集
 zNewSet = zRegSet + zIncrSet;  % 新的z坐标集
 % t_coord_update_time = toc(t_coord_update);  % 性能统计已注释
 
+
 %% ===================================================================
 %% 几何约束和正则化处理
 %% ===================================================================
 
 %% 边界约束处理
 % t_constraint = tic;  % 性能统计已注释
+% 保存约束处理前的原始坐标，用于对比分析
+yOrigSet = yNewSet;
+zOrigSet = zNewSet;
 % 根据边界条件调整裂纹形状，同时检测是否发生分裂
 [yNewSet, zNewSet, SPLITTED] = addConstraintNewSatgeFunc(yNewSet, zNewSet);
 
-% t_constraint_time = toc(t_constraint);  % 性能统计已注释
+%% 检查坐标点数量是否过少
+if length(yNewSet) <= 1 || length(zNewSet) <= 1
+    fprintf('  [坐标检查] 粒子%d裂纹坐标点数量过少（仅剩%d个点），正在绘制图像并终止程序...\n', ...
+        particle_idx, min(length(yNewSet), length(zNewSet)));
+    fprintf('  剩余坐标点信息:\n');
+    for k = 1:min(length(yNewSet), length(zNewSet))
+        fprintf('    第%d个点: (z=%.6f, y=%.6f)\n', k, zNewSet(k), yNewSet(k));
+    end
+    % 绘制最原始输入的图形
+    plotCrackCoordinates(yInputSet, zInputSet, particle_idx, -1, -1);  % 包含粒子编号
+    % 绘制处理前的原始图形
+    plotCrackCoordinates(yOrigSet, zOrigSet, particle_idx, -2, -2);  % 包含粒子编号
+    % 绘制约束处理后的图形
+    plotCrackCoordinates(yNewSet, zNewSet, particle_idx, -3, -3);   % 包含粒子编号
+    error('[坐标检查] 粒子%d裂纹坐标点数量不足，无法继续计算！', particle_idx);
+end
+
+%% 检查边界违规
+[hasViolation, violationInfo] = checkBoundaryViolation(yNewSet, zNewSet);
+if hasViolation
+    fprintf('  [边界检查] 粒子%d发现裂纹坐标超出边界，正在绘制图像并终止程序...\n', particle_idx);
+    fprintf('  违规坐标点详情:\n');
+    for k = 1:length(violationInfo)
+        fprintf('    第%d个点 (z=%.6f, y=%.6f) 在%s: %s\n', ...
+            violationInfo(k).point, violationInfo(k).z, violationInfo(k).y, ...
+            violationInfo(k).region, violationInfo(k).reason);
+    end
+    % 绘制最原始输入的图形
+    plotCrackCoordinates(yInputSet, zInputSet, particle_idx, -1, -1);  % 包含粒子编号
+    % 绘制处理前的原始图形
+    plotCrackCoordinates(yOrigSet, zOrigSet, particle_idx, -2, -2);  % 包含粒子编号
+    % 绘制约束处理后的图形
+    plotCrackCoordinates(yNewSet, zNewSet, particle_idx, -3, -3);   % 包含粒子编号
+    error('[边界检查] 粒子%d检测到裂纹坐标超出物理边界！程序终止以确保计算质量。', particle_idx);
+end
 
 %% 几何正则化
 % t_regular = tic;  % 性能统计已注释
 % 重新生成规则的裂纹轮廓，确保几何约束满足且没有自相交
-% 输入参数 'false' 表示不强制执行某些特殊约束
 [yRegSet, zRegSet, ~, SPLITTED] = crackRegular5Func(yNewSet, zNewSet, nRegPoint, 'false');
-% t_regular_time = toc(t_regular);  % 性能统计已注释
+
 
 
 %% 输出参数（当前版本保持材料参数不变）

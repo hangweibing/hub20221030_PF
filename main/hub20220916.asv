@@ -8,7 +8,7 @@ clear; close all; clc; tic; format long;
 %% ===================================================================
 %% 随机数种子设置（确保结果可重复）
 %% ===================================================================
-SIM_SEED = 2026;  % 您可以修改此数值来获得不同的随机序列
+SIM_SEED = 2023;  % 您可以修改此数值来获得不同的随机序列
 rng(SIM_SEED);    % 设置全局随机数种子
 
 % 添加路径（可选）
@@ -92,13 +92,6 @@ thetas = linspace(3/2*pi, 2*pi, n_nodes); % 角度分布
 yIniRegSet = zeros(1, n_nodes);          % 初始y坐标集
 zIniRegSet = zeros(1, n_nodes);          % 初始z坐标集
 
-%% ===================================================================
-%% Walker定律参数先验分布设置
-%% ===================================================================
-
-% 先验分布参数（已注释的多元正态分布）
-% mu = [-10.8 3];
-% SIGMA = [0.05^2 -0.02^2; -0.02^2 0.01^2];
 
 %% ===================================================================
 %% 粒子群初始化
@@ -107,17 +100,17 @@ zIniRegSet = zeros(1, n_nodes);          % 初始z坐标集
 for i = 1:N   % 遍历所有粒子
     %% 参数采样（NASGRO(H-S)模型四参数）
     % logD: 均匀分布 
-    logD = unifrnd(-9.5, -9.0, 1, 1);
+    logD = unifrnd(-11, -9.00, 1, 1);
     
     % A: 均匀分布 
-    A = unifrnd(40, 130, 1, 1);
+    A = unifrnd(45, 100, 1, 1);
     
     % delta_kthr: 均匀分布
-    delta_kthr = unifrnd(0.08, 1, 1, 1);
+    delta_kthr = unifrnd(0.01, 4, 1, 1);
     
     % p: 正态分布 
-    p = normrnd(2.12, 0.3, 1, 1);
-
+    % p = normrnd(2.12, 0.04, 1, 1);
+    p = unifrnd(1.88, 2.55, 1, 1);
     %% 几何参数采样（裂纹尺寸）
     a = normrnd(2, 0.05, 1, 1);  % 裂纹半径（均值2mm，标准差0.05mm）
     c = a;                        % 设置为圆形（c = a）
@@ -237,14 +230,25 @@ testErrSet = [0.019803420755871 0.058377623733943 0.013343080193008 ...
               0.057544490601307];
 
 %% ===================================================================
+%% Debug模式配置（裂纹可视化）
+%% ===================================================================
+
+% Debug模式开关
+DEBUG_MODE = true;                    % 设置为 true 开启debug模式，false 关闭
+
+% Debug模式参数（仅在DEBUG_MODE=true时生效）
+DEBUG_PARTICLE_IDX = 228;               % 需要跟踪绘制的粒子编号（1~N）
+DEBUG_PLOT_INTERVAL = 5;             % 绘图间隔：每隔多少次while循环保存一次图像
+
+% Debug模式计数器初始化
+if DEBUG_MODE
+    debug_plot_counter = 0;           % 绘图计数器
+    fprintf('[Debug模式] 已开启，将跟踪粒子 %d 的裂纹变化，绘图间隔：每 %d 次循环\n', ...
+        DEBUG_PARTICLE_IDX, DEBUG_PLOT_INTERVAL);
+end
+
+%% ===================================================================
 %% 粒子滤波主循环
-%% ===================================================================
-
-% 清屏显示
-clc;
-
-%% ===================================================================
-%% 循环变量初始化
 %% ===================================================================
 
 % 分裂状态临时存储
@@ -285,7 +289,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     %% ===================================================================
 
     % 初始化当前时间步的K值存储（parfor兼容）
-    particles_K_max_temp = zeros(N, 1);
+    particles_deltaK_max_temp = zeros(N, 1);
     
     for (i = 1:N)
         %% 粒子级变量初始化
@@ -364,10 +368,10 @@ while (m-1)*step/1950.70866 <= t_check(end)
         %% 调用预测模型更新粒子状态
         [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
             a2aNew(yRegSet, zRegSet, aver_delta_sigma, aver_R_set(m-1), m_name, ...
-                   curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet);
-        
-        %% 存储当前粒子的95%分位数应力强度因子
-        particles_K_max_temp(i) = prctile(deltaKSet, 95);
+                   curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet, i);
+
+        %% 存储当前粒子的100%分位数应力强度因子
+        particles_deltaK_max_temp(i) = max(deltaKSet);
 
         %% 更新粒子状态（parfor兼容：直接确保实数）
         % 原方案: xparticle(i, :, m) = [...]; xparticle = real(xparticle);
@@ -377,8 +381,8 @@ while (m-1)*step/1950.70866 <= t_check(end)
         SPLITTE_temp(i) = SPLITTED;      % 更新分裂状态
     end
     
-    % 将parfor循环中的K值复制到主数组
-    particles_K_max = particles_K_max_temp;
+    % 将parfor循环中的 K 值复制到主数组
+    particles_K_max = particles_deltaK_max_temp / (1 - aver_R_set(m-1));
 
     %% 计算粒子滤波统计量
     weight(:, m) = 1/N * ones(N, 1);             % 均匀权重初始化
@@ -435,7 +439,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
             D(i, m) = sqrt(xparticle_cov(i, i, m));      % 标准差
             e(:, i, m) = kernelsampling(N)';             % 核采样扰动
         end
-        outindex = randomr(weight(:, m));                % 按权重重采样
+        outindex = randomr(weight(:, m), SIM_SEED + m*N);  % 按权重重采样，使用确定性种子
         xparticle(:, :, m) = xparticle(outindex, :, m); 
         % 已注释：传统重采样方法
         % xparticle1(:,:,m)=xparticle(outindex,:,m);                                 % 重采样
@@ -451,6 +455,32 @@ while (m-1)*step/1950.70866 <= t_check(end)
         j = j + 1;  % 观测计数器递增
     end
 
+    %% ===================================================================
+    %% Debug模式：裂纹可视化绘图
+    %% ===================================================================
+    if DEBUG_MODE
+        debug_plot_counter = debug_plot_counter + 1;
+        
+        % 每隔指定次数循环，绘制指定粒子的裂纹图像
+        if debug_plot_counter >= DEBUG_PLOT_INTERVAL
+            % 获取指定粒子的当前裂纹坐标
+            yDebugSet = xparticle(DEBUG_PARTICLE_IDX, 1:21, m);
+            zDebugSet = xparticle(DEBUG_PARTICLE_IDX, 22:42, m);
+            
+            % 计算当前飞行小时数
+            current_flight_hours = (m-1)*step/1950.70866;
+
+            % 调用绘图函数
+            plotCrackCoordinates(yDebugSet, zDebugSet, DEBUG_PARTICLE_IDX, m, current_flight_hours);
+            fprintf('  [Debug] 已绘制粒子 %d 在时间步 %d (%.2f小时) 的裂纹图像\n', ...
+                DEBUG_PARTICLE_IDX, m, current_flight_hours);
+
+            
+            % 重置计数器
+            debug_plot_counter = 0;
+        end
+    end
+
     m = m + 1;  % 时间步递增
     
     % 计算耗时
@@ -460,7 +490,6 @@ while (m-1)*step/1950.70866 <= t_check(end)
     disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测', ...
           '，当前步耗时：' num2str(iter_time, '%.2f') 's', ...
           '，累计总耗时：' num2str(total_time, '%.2f') 's']);
-    
 end
 
 %% ===================================================================
