@@ -5,7 +5,7 @@
 load('debug_particles_coordinates.mat', 'particles_coordinates');
 
 % 获取用户输入的粒子编号和间隔数
-particle_idx = 198;
+particle_idx = 1023;
 interval = 2;
 
 % 检查粒子编号是否有效

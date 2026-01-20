@@ -5,6 +5,14 @@
 % 清理工作空间
 clear; close all; clc; tic; format long;
 
+% 设置图形参数
+set(groot, 'defaultFigureColor', 'white');
+set(groot, 'defaultAxesFontSize', 10);
+set(groot, 'defaultAxesFontName', 'Arial');
+set(groot, 'defaultTextInterpreter', 'none');
+set(groot, 'defaultLegendInterpreter', 'none');
+set(groot, 'defaultAxesTickLabelInterpreter', 'none');
+
 %% ===================================================================
 %% 随机数种子设置（确保结果可重复）
 %% ===================================================================
@@ -14,19 +22,117 @@ rng(SIM_SEED);    % 设置全局随机数种子
 % 添加路径（可选）
 % addpath surModelPackage
 
+% 初始化 KDE 采样
+kde_sampling('preprocess');
+
+
 %% ===================================================================
 %% 粒子滤波算法参数配置
 %% ===================================================================
 
+% Debug模式开关
+DEBUG_MODE = false;                    % 设置为 true 开启debug模式，false 关闭
+
 % 基本粒子滤波参数
 n = 1;                                    % 状态向量的维度（每个粒子）
-N = 20000;                                  % 粒子数量
+N = 2000;                                  % 粒子数量
 v_sphere = 2;                             % 一维空间维度参数
 
 % 正则化粒子滤波参数计算
 A = (8/v_sphere*(n+4)*(2*sqrt(pi))^n)^(1/(n+4));
 h = A*N^(-1/(n+4));                       % 正则化粒子滤波的平滑参数
 
+% 预采样所有粒子的参数组合（提高效率）
+if ~DEBUG_MODE
+    fprintf('预采样 %d 个粒子的参数组合...\n', N);
+    particle_params = kde_sampling('batch_sample', N);
+    % particle_params = copula_sampling('batch_sample', N);
+    fprintf('参数预采样完成！\n');
+else
+    fprintf('[Debug模式] 跳过预采样，将使用训练数据直接采样\n');
+    particle_params = [];  % Debug模式下不需要预采样
+end
+
+%% ===================================================================
+%% 采样结果可视化
+%% ===================================================================
+if ~DEBUG_MODE
+    % 获取训练数据用于可视化对比
+    T = readtable('AM-TC4-GRO.xlsx');
+    X_train = table2array(T);
+    param_names = T.Properties.VariableNames;
+    d = size(X_train, 2);
+
+    % 创建简单的可视化对比
+    figure('Name', '采样参数分布对比', 'Position', [100, 100, 1000, 600]);
+    for i = 1:d
+        subplot(2,2,i)
+        % 绘制采样数据的分布
+        histogram(particle_params(:,i), 30, 'Normalization','pdf', 'FaceColor', 'b', 'FaceAlpha', 0.6);
+        hold on
+        % 绘制训练数据的分布
+        histogram(X_train(:,i), 15, 'Normalization','pdf', 'FaceColor', 'r', 'FaceAlpha', 0.4);
+
+        % 设置标题和标签
+        clean_name = strrep(param_names{i}, '_', '-');
+        title(sprintf('%s Distribution Comparison', clean_name), 'Interpreter', 'none', 'FontSize', 11, 'FontName', 'Arial')
+        xlabel(clean_name, 'Interpreter', 'none', 'FontSize', 9, 'FontName', 'Arial')
+        ylabel('Probability Density', 'FontSize', 9, 'FontName', 'Arial')
+        legend(' Sampled', 'Training Data', 'Location', 'best', 'FontSize', 8, 'FontName', 'Arial')
+        grid on
+        set(gca, 'FontName', 'Arial', 'FontSize', 8)
+    end
+
+    %% 三参数联合分布可视化（三维散点图）
+    figure('Name', '三参数联合分布对比', 'Position', [100, 100, 1200, 800]);
+
+    % 计算需要显示的三参数组合 (4个参数的三参数组合 = 4种)
+    param_triplets = [
+        1,2,3;  % 参数1,2,3
+        1,2,4;  % 参数1,2,4
+        1,3,4;  % 参数1,3,4
+        2,3,4   % 参数2,3,4
+    ];
+
+    for k = 1:4
+        i = param_triplets(k,1);
+        j = param_triplets(k,2);
+        l = param_triplets(k,3);
+
+        subplot(2,2,k);
+
+        % 绘制训练数据的三维散点图
+        scatter3(X_train(:,i), X_train(:,j), X_train(:,l), 20, 'filled', ...
+                'MarkerFaceColor', 'r', 'MarkerFaceAlpha', 0.4, 'MarkerEdgeColor', 'none');
+        hold on;
+
+        % 绘制Copula采样数据的三维散点图
+        scatter3(particle_params(:,i), particle_params(:,j), particle_params(:,l), 15, 'filled', ...
+                'MarkerFaceColor', 'b', 'MarkerFaceAlpha', 0.3, 'MarkerEdgeColor', 'none');
+
+        % 清理变量名用于显示（移除下划线等特殊字符）
+        clean_name_i = strrep(param_names{i}, '_', '-');
+        clean_name_j = strrep(param_names{j}, '_', '-');
+        clean_name_l = strrep(param_names{l}, '_', '-');
+
+        xlabel(clean_name_i, 'Interpreter', 'none', 'FontSize', 9, 'FontName', 'Arial');
+        ylabel(clean_name_j, 'Interpreter', 'none', 'FontSize', 9, 'FontName', 'Arial');
+        zlabel(clean_name_l, 'Interpreter', 'none', 'FontSize', 9, 'FontName', 'Arial');
+
+        title(sprintf('%s vs %s vs %s', clean_name_i, clean_name_j, clean_name_l), ...
+              'Interpreter', 'none', 'FontSize', 10, 'FontName', 'Arial');
+
+        legend('Training Data', 'Sampled', 'Location', 'best', 'FontSize', 8, 'FontName', 'Arial');
+
+        grid on;
+        set(gca, 'FontName', 'Arial', 'FontSize', 8);
+
+        % 设置视角以获得更好的视觉效果
+        view(45, 30);
+    end
+
+    fprintf('参数分布可视化完成！\n');
+end
 %% ===================================================================
 %% 数据存储矩阵初始化
 %% ===================================================================
@@ -42,10 +148,10 @@ xparticle_cov = zeros(46, 46, 1000);     % 粒子协方差矩阵
 
 % 参数粒子存储
 upcrackparticles = zeros(N, 1000);       % 上表面裂纹粒子
-logDparticles = zeros(N, 1000);          % logD参数粒子（NASGRO模型）
-Aparticles = zeros(N, 1000);             % A参数粒子（NASGRO模型）
-delta_kthrparticles = zeros(N, 1000);     % delta_kthr参数粒子（NASGRO模型）
-pparticles = zeros(N, 1000);             % p参数粒子（NASGRO模型）
+log_theta1_particles = zeros(N, 1000);   % log_theta1_参数粒子（NASGRO模型）
+theta2_particles = zeros(N, 1000);       % theta2参数粒子（NASGRO模型）
+theta3_particles = zeros(N, 1000);       % theta3参数粒子（NASGRO模型）
+k2_particles = zeros(N, 1000);           % k2参数粒子（NASGRO模型）
 weight = zeros(N, 1000);                 % 粒子权重
 
 % POF计算相关变量
@@ -63,8 +169,8 @@ std_Kc = 3.34 ;                           % 断裂韧性标准差 (MPa√m)
 % z      =[2.4882E+00 2.9894E+00 4.0190E+00 5.46751 7.2212E+00 10.4231 1.3130E+01 1.6057E+01 2.0226E+01 2.1715E+01 2.2903E+01 2.3452E+01]+30;
 
 % 实际使用的观测数据（简化版）
-t_check = [5.8741E+01 9.9534E+01 1.3869E+02  1.8275E+02 2.4204E+02 2.8120E+02];
-z       = [2.4882E+00 2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
+t_check = [9.9534E+01 1.3869E+02  1.8275E+02 2.4204E+02 2.8120E+02];
+z       = [2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
 
 % 观测相关参数
 zPred = zeros(N, 1);                     % 预测观测值
@@ -98,19 +204,19 @@ zIniRegSet = zeros(1, n_nodes);          % 初始z坐标集
 %% ===================================================================
 
 for i = 1:N   % 遍历所有粒子
-    %% 参数采样（NASGRO(H-S)模型四参数）
-    % logD: 均匀分布 
-    logD = unifrnd(-10.5, -9.00, 1, 1);
-    
-    % A: 均匀分布 
-    A = unifrnd(110, 160, 1, 1);
-    
-    % delta_kthr: 均匀分布
-    delta_kthr = unifrnd(0.1, 1.5, 1, 1);
-    
-    % p: 正态分布 
-    % p = normrnd(2.12, 0.04, 1, 1);
-    p = unifrnd(1.80, 2.18, 1, 1);
+    %% 参数采样
+    if DEBUG_MODE
+        %% Debug模式：使用训练数据直接采样
+        [log_theta1_, theta2, theta3, k2] = debug_sampling();
+    else
+        %% 正常模式：使用预采样的 Copula 参数
+        log_theta1_ = particle_params(i, 1);
+        theta2 = particle_params(i, 2);
+        theta3 = particle_params(i, 3);
+        k2 = particle_params(i, 4);
+    end
+
+    % 使用新的变量名（已从预采样参数映射）
     %% 几何参数采样（裂纹尺寸）
     a = normrnd(2, 0.05, 1, 1);  % 裂纹半径（均值2mm，标准差0.05mm）
     c = a;                        % 设置为圆形（c = a）
@@ -123,8 +229,8 @@ for i = 1:N   % 遍历所有粒子
     end
 
     %% 粒子状态存储
-    % 完整状态向量：[y坐标集(21), z坐标集(21), logD, A, delta_kthr, p]
-    xparticle(i, :, 1) = [yIniRegSet, zIniRegSet, logD, A, delta_kthr, p];
+    % 完整状态向量：[y坐标集(21), z坐标集(21), log_theta1_, theta2, theta3, k2]
+    xparticle(i, :, 1) = [yIniRegSet, zIniRegSet, log_theta1_, theta2, theta3, k2];
 end
 
 %% ===================================================================
@@ -133,10 +239,10 @@ end
 
 % 提取各参数的粒子分布
 upcrackparticles(:, 1) = xparticle(:, 42, 1);      % 上表面裂纹长度
-logDparticles(:, 1) = xparticle(:, 43, 1);         % logD参数（NASGRO模型）
-Aparticles(:, 1) = xparticle(:, 44, 1);            % A参数（NASGRO模型）
-delta_kthrparticles(:, 1) = xparticle(:, 45, 1);  % delta_kthr参数（NASGRO模型）
-pparticles(:, 1) = xparticle(:, 46, 1);            % p参数（NASGRO模型）
+log_theta1_particles(:, 1) = xparticle(:, 43, 1);  % log_theta1_参数（NASGRO模型）
+theta2_particles(:, 1) = xparticle(:, 44, 1);      % theta2参数（NASGRO模型）
+theta3_particles(:, 1) = xparticle(:, 45, 1);      % theta3参数（NASGRO模型）
+k2_particles(:, 1) = xparticle(:, 46, 1);          % k2参数（NASGRO模型）
 
 % 初始化粒子权重（均匀分布）
 weight(:, 1) = 1/N * ones(N, 1);
@@ -169,6 +275,7 @@ spectra = spectra(2:end);
 step = 1000;
 aver_delta_sigma_set = zeros(1, ceil((length(spectra))/2/step));
 aver_R_set = zeros(1, ceil((length(spectra))/2/step));  % 平均应力比数组
+aver_Smax_set = zeros(1, ceil((length(spectra))/2/step)); % 平均最大应力数组
 k=1;
 
 % 一个step内的平均 delta_sigma 和平均应力比
@@ -186,6 +293,8 @@ for i=1:floor((length(spectra))/2/step)
     aver_delta_sigma_set(i)=mean(delta_sigmas);
     % 计算平均应力比 R = Smin的均值 / Smax的均值
     aver_R_set(i) = mean(Smin_values) / mean(Smax_values);
+    % 计算平均最大应力
+    aver_Smax_set(i) = mean(Smax_values);
     k=k+step;
 end
 %
@@ -207,6 +316,7 @@ while k<=(length(spectra)/2)
 end
 aver_delta_sigma_set(end)=mean(delta_sigmas);
 aver_R_set(end) = mean(Smin_values) / mean(Smax_values);
+aver_Smax_set(end) = mean(Smax_values);
 
 %% ===================================================================
 %% 模型参数配置
@@ -224,9 +334,6 @@ testErrSet = [0.019803420755871 0.058377623733943 0.013343080193008 ...
 %% ===================================================================
 %% Debug模式配置（裂纹可视化）
 %% ===================================================================
-
-% Debug模式开关
-DEBUG_MODE = true;                    % 设置为 true 开启debug模式，false 关闭
 
 % Debug模式参数（仅在DEBUG_MODE=true时生效）
 DEBUG_PARTICLE_IDX = 228;               % 需要跟踪绘制的粒子编号（1~N）
@@ -283,7 +390,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     % 初始化当前时间步的K值存储
     particles_deltaK_max_temp = zeros(N, 1);
     
-    parfor (i = 1:N)
+    for (i = 1:N)
         %% 粒子级变量初始化
         curUinput = {};
         curAverInput = {};
@@ -351,28 +458,27 @@ while (m-1)*step/1950.70866 <= t_check(end)
         % 保存当前粒子的坐标信息（第m次更新前的[y,z]坐标）
         particles_coordinates{i} = [particles_coordinates{i}; [yRegSet, zRegSet]];
 
-        % NASGRO(H-S)模型参数
-        logD = xparticlei(43);           % NASGRO模型参数logD
-        A = xparticlei(44);              % NASGRO模型参数A
-        delta_kthr = xparticlei(45);     % NASGRO模型参数delta_kthr
-        p = xparticlei(46);              % NASGRO模型参数p
+        log_theta1_ = xparticlei(43);    % 模型参数log_theta1_
+        theta2 = xparticlei(44);         % 模型参数theta2
+        theta3 = xparticlei(45);         % 模型参数theta3
+        k2 = xparticlei(46);             % 模型参数k2
 
         % 可选：绘制裂纹几何形状
         % figure; plot_geometry_20; plot(zRegSet, yRegSet); axis equal;
 
         %% 调用预测模型更新粒子状态
-        [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
-            a2aNew(yRegSet, zRegSet, aver_delta_sigma, aver_R_set(m-1), m_name, ...
-                   curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet, i);
+        [yRegSet, zRegSet, SPLITTED, log_theta1_, theta2, theta3, k2, deltaKSet] = ...
+            a2aNew(yRegSet, zRegSet, aver_delta_sigma, aver_R_set(m-1), aver_Smax_set(m-1), m_name, ...
+                   curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, i);
 
         %% 存储当前粒子的100%分位数应力强度因子
-        particles_deltaK_max_temp(i) = max(deltaKSet);
+        particles_deltaK_max_temp(i) = deltaKSet(end);
 
         %% 更新粒子状态（parfor兼容：直接确保实数）
         % 原方案: xparticle(i, :, m) = [...]; xparticle = real(xparticle);
         % 问题: 第二行违反parfor切片规则，读取整个数组导致竞态条件
         % 解决: 在赋值时直接取实部，避免全局数组操作
-        xparticle(i, :, m) = real([yRegSet, zRegSet, logD, A, delta_kthr, p]);
+        xparticle(i, :, m) = real([yRegSet, zRegSet, log_theta1_, theta2, theta3, k2]);
         SPLITTE_temp(i) = SPLITTED;      % 更新分裂状态
     end
 
@@ -401,10 +507,10 @@ while (m-1)*step/1950.70866 <= t_check(end)
 
     %% 提取关键参数的历史记录
     upcrackparticles(:, m) = xparticle(:, 42, m);      % 上表面裂纹长度
-    logDparticles(:, m) = xparticle(:, 43, m);         % logD参数（NASGRO模型）
-    Aparticles(:, m) = xparticle(:, 44, m);            % A参数（NASGRO模型）
-    delta_kthrparticles(:, m) = xparticle(:, 45, m);  % delta_kthr参数（NASGRO模型）
-    pparticles(:, m) = xparticle(:, 46, m);           % p参数（NASGRO模型）
+    log_theta1_particles(:, m) = xparticle(:, 43, m);  % log_theta1_参数（NASGRO模型）
+    theta2_particles(:, m) = xparticle(:, 44, m);      % theta2参数（NASGRO模型）
+    theta3_particles(:, m) = xparticle(:, 45, m);      % theta3参数（NASGRO模型）
+    k2_particles(:, m) = xparticle(:, 46, m);          % k2参数（NASGRO模型）
     % 可选：根据观测次数调整观测噪声
     % if j<=4; R=0.5; else R=0.3; end;
 

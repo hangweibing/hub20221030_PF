@@ -2,8 +2,8 @@
 %% 函数名称：a2aFunc
 %% 功能描述：基于POD神经网络模型的裂纹扩展预测核心算法
 %% ===================================================================
-function [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
-         a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, m_name, curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet, particle_idx)
+function [yRegSet, zRegSet, SPLITTED, log_theta1_, theta2, theta3, k2, deltaKSet] = ...
+         a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, aver_Smax, m_name, curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, particle_idx)
 
 %A2AFUNC 基于当前时刻的裂纹状态和对应模型预测下一时刻的裂纹状态
 %
@@ -16,13 +16,14 @@ function [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
 %   zRegSet:         当前时刻z坐标集 (21个节点)
 %   aver_delta_sigma: 平均应力增量 (MPa)
 %   aver_R:           平均应力比 R = Smin/Smax
+%   aver_Smax:        平均最大应力 (MPa)
 %   m_name:          模型名称 (如 'nn_stage3', 'nn_stage5s' 等)
 %   curUinput:       分裂模型的U输入矩阵 (POD基向量)
 %   curAverInput:    分裂模型的平均输入数据
-%   logD:            NASGRO(H-S)模型参数 logD (当前值)
-%   A:               NASGRO(H-S)模型参数 A (当前值)
-%   delta_kthr:      NASGRO(H-S)模型参数 delta_kthr (当前值)
-%   p:               NASGRO(H-S)模型参数 p (当前值)
+%   log_theta1_:     新的模型参数 theta1 (对数形式)
+%   theta2:          新的模型参数 theta2
+%   theta3:          新的模型参数 theta3
+%   k2:              新的模型参数 k2
 %   step:            时间步长 (默认值为1)
 %   testErrSet:      测试误差集 (用于模型不确定性)
 %
@@ -30,10 +31,10 @@ function [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
 %   yRegSet:         预测的下一时刻y坐标集
 %   zRegSet:         预测的下一时刻z坐标集
 %   SPLITTED:        裂纹是否发生分裂 (0/1)
-%   logD:            更新的NASGRO(H-S)模型参数 logD
-%   A:               更新的NASGRO(H-S)模型参数 A
-%   delta_kthr:      更新的NASGRO(H-S)模型参数 delta_kthr
-%   p:               更新的NASGRO(H-S)模型参数 p
+%   log_theta1_:     更新的模型参数 theta1
+%   theta2:          更新的模型参数 theta2
+%   theta3:          更新的模型参数 theta3
+%   k2:              更新的模型参数 k2
 %   deltaKSet:       应力强度因子范围（用于POF计算）
 %
 
@@ -47,7 +48,6 @@ if nargin <= 11
 end
 
 %% 基本参数计算
-D = 10^logD;                    % NASGRO(H-S)模型参数D (从对数形式转换)
 nRegPoint = length(yRegSet);   % 裂纹轮廓节点数量
 
 % 保存最原始的输入坐标，用于边界违规时的对比分析
@@ -63,41 +63,38 @@ input = curUinput' * (inputRegSet - curAverInput);  % POD投影，每一列表�
 %% ===================================================================
 %% 神经网络预测K（！！！！！注意单位！！！！！）
 %% ===================================================================
-[deltaKSet] = sim_K_func(m_name, input, aver_delta_sigma, testErrSet);
-% 计算Kmax：Kmax = deltaK / (1 - R)
-% 注意：deltaKSet的单位是MPa√mm，需要转换为MPa√m（除以sqrt(1000)）
-deltaKSet_vec = deltaKSet';  % 转换为行向量
-deltaKSet_m = deltaKSet_vec / sqrt(1000);  % 从mm单位转换为m单位
-Kmax = deltaKSet_m ./ (1 - aver_R) ;  % Kmax = ΔK / (1 - R)
+% 使用神经网络计算 deltaK Kmax
+[deltaKSet] = sim_K_func(m_name, input, aver_delta_sigma * 0.367, testErrSet);
+deltaKSet_vec = deltaKSet';  
+deltaKSet_m = deltaKSet_vec / sqrt(1000);  
 
+[Kmax] = sim_K_func(m_name, input, aver_Smax * 0.367, testErrSet);
+Kmax = Kmax / sqrt(1000);
+Kmax = Kmax';  % 转换为行向量，与deltaKSet_m保持一致的维度
+
+% deltaKSet_vec = deltaKSet';  % 转换为行向量
+% deltaKSet_m = deltaKSet_vec / sqrt(1000);  % 从mm单位转换为m单位
+% Kmax = deltaKSet_m ./ (1 - aver_R) ;  % Kmax = ΔK / (1 - R)
 %% 裂纹几何参数计算
 ksiRegSet = linspace(0, 1, nRegPoint);  % 节点参数化坐标 (0~1)
 y_ini = 13;                             % 初始圆心y坐标
 z_ini = 30;                             % 初始圆心z坐标
 a_old = sqrt((yRegSet - y_ini).^2 + (zRegSet - z_ini).^2);  % 当前裂纹尺寸
 
-%% NASGRO(H-S)模型裂纹扩展计算
-% da/dN = D * [(ΔK - ΔK_thr) / (1 - K_max/A)^0.5]^p
-% 其中：da-裂纹扩展量，dN-循环次数，ΔK-应力强度因子范围
-%      K_max = ΔK / (1 - R)，其中R为应力比
+%% 新的裂纹扩展模型计算
+% da = step * theta1 * (delta)^theta2 * (Kmax/k2 - 1)^theta3
+% 其中：da-裂纹扩展量，delta-应力增量，Kmax-最大应力强度因子
+%      theta1, theta2, theta3, k2 - 模型参数
 
+% 计算新的模型公式
+% 注意：需要确保括号内的值不为负数
+bracket_term = Kmax ./ k2 - 1;
+bracket_term = max(bracket_term, 0);  % 确保不为负数
 
-
-% 计算分母项：(1 - K_max/A)^0.5，避免负值或零值
-denominator = 1 - Kmax ./ A;
-% 确保分母项为正且不为零（避免数值问题）
-denominator = max(denominator, 1e-10);  % 设置最小值阈值
-denominator = sqrt(denominator);
-
-% 计算分子项：(ΔK - ΔK_thr)，确保非负
-% 注意：delta_kthr的单位是MPa√m，deltaKSet_m也是MPa√m，单位一致
-numerator = deltaKSet_m - delta_kthr;
-numerator = max(numerator, 0);  % 如果ΔK < ΔK_thr，则da = 0
-
-% NASGRO(H-S)模型公式
-da = step * D .* (numerator ./ denominator).^p ;
+% 新的模型公式：将对数参数转换为实际参数值
+theta1 = 10 ^ (log_theta1_);  % 从对数形式转换为实际参数值
+da = step * theta1 .* (deltaKSet_m .^ theta2) .* (bracket_term .^ theta3);
 da = 1e3 * da; % 单位转换
-
 
 %% ===================================================================
 %% 特殊情况处理：小裂纹的各向同性扩展
@@ -213,10 +210,10 @@ end
 
 
 %% 输出参数（当前版本保持材料参数不变）
-logD = logD;          % NASGRO(H-S)模型参数logD (保持不变)
-A = A;                % NASGRO(H-S)模型参数A (保持不变)
-delta_kthr = delta_kthr;  % NASGRO(H-S)模型参数delta_kthr (保持不变)
-p = p;                % NASGRO(H-S)模型参数p (保持不变)
+log_theta1_ = log_theta1_;  % 模型参数theta1 (保持不变)
+theta2 = theta2;            % 模型参数theta2 (保持不变)
+theta3 = theta3;            % 模型参数theta3 (保持不变)
+k2 = k2;                    % 模型参数k2 (保持不变)
 % deltaKSet 已在第62行计算，作为输出返回用于POF计算
 end
 

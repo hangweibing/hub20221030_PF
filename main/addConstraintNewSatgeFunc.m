@@ -589,14 +589,63 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
         end
     end
 
-    % 过滤超过上边界（y=11）的点，保留第一个违规点之前的数据
-    max_y_loca = find(zNewSet >= 37.82842712 & yNewSet > 11);  % 查找z>=37.82842712且y>11的点
-    if ~isempty(max_y_loca)
-        % 保留从开始到第一个违规点之前的数据
-        first_violation = max_y_loca(1);
-        if first_violation > 1
-            zNewSet = zNewSet(1:first_violation-1);
-            yNewSet = yNewSet(1:first_violation-1);
+    % 检查是否有点在上圆弧区域内
+    upCenter = [37.82842712, 14];       % 上圆角圆心坐标 [z, y]
+    radius = 3;                         % 圆弧半径
+
+    % 检查是否有点在上圆弧区域内（z在圆心z坐标附近，考虑半径范围）
+    points_in_upper_arc = false;
+    for i = 1:length(yNewSet)
+        point = [zNewSet(i), yNewSet(i)];  % [z, y] 坐标
+        if isPointInCircleFunc(point, upCenter, radius)
+            points_in_upper_arc = true;
+            break;
+        end
+    end
+
+    if points_in_upper_arc
+        % 有点在上圆弧内：过滤超出上圆弧的点
+        fprintf('检测到点在上圆弧区域内，过滤超出上圆弧的点\n');
+
+        % 查找超出上圆弧的点
+        violation_indices = [];
+        for i = 1:length(yNewSet)
+            z = zNewSet(i);
+            y = yNewSet(i);
+            point = [z, y];
+
+            % 如果点在圆弧区域但超出上边界
+            if isPointInCircleFunc(point, upCenter, radius)
+                % 计算该z坐标对应的上边界y值
+                if abs(z - upCenter(1)) <= radius
+                    y_upper_boundary = upCenter(2) - sqrt(radius^2 - (z - upCenter(1))^2);
+                    if y > y_upper_boundary
+                        violation_indices = [violation_indices, i];
+                    end
+                end
+            end
+        end
+
+        % 过滤违规点
+        if ~isempty(violation_indices)
+            first_violation = violation_indices(1);
+            if first_violation > 1
+                zNewSet = zNewSet(1:first_violation-1);
+                yNewSet = yNewSet(1:first_violation-1);
+            end
+        end
+    else
+        % 没有点在上圆弧内：过滤超出上边界（y=11）的点
+        fprintf('没有点在上圆弧区域内，过滤超出上边界y=11的点\n');
+
+        max_y_loca = find(zNewSet >= 37.82842712 & yNewSet > 11);  % 查找z>=37.82842712且y>11的点
+        if ~isempty(max_y_loca)
+            % 保留从开始到第一个违规点之前的数据
+            first_violation = max_y_loca(1);
+            if first_violation > 1
+                zNewSet = zNewSet(1:first_violation-1);
+                yNewSet = yNewSet(1:first_violation-1);
+            end
         end
     end
 
