@@ -51,6 +51,11 @@ if (~isempty(intersected_coords))
         y_add = linspace(leftInsecY, rightInsecY, 10);
         z_add = linspace(leftInsecZ, rightInsecZ, 10);
 
+        % 将这些插值点投影到下圆弧上
+        for i = 1:length(z_add)
+            [y_add(i), z_add(i)] = getEdgeYbyZFunc(z_add(i), 'down', y_add(i));
+        end
+
         % 重新组合裂纹坐标：左侧段 + 圆弧段 + 右侧段
         yNewSet = [yNewSet(1:left_coord-1), y_add, yNewSet(right_coord+1:end)];
         zNewSet = [zNewSet(1:left_coord-1), z_add, zNewSet(right_coord+1:end)];

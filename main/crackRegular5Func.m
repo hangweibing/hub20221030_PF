@@ -60,8 +60,12 @@ intersected_coords = find(judge == true);
 if isempty(intersected_coords)
     %% 子情况1：无相交节点，标准四点采样
     % 选择起始点、左侧中间点、右侧中间点、结束点
-    zIniSet = zIniSet([1, mid_left_point_index, mid_right_point_index, end]);
-    yIniSet = yIniSet([1, mid_left_point_index, mid_right_point_index, end]);
+    try
+        zIniSet = zIniSet([1, mid_left_point_index, mid_right_point_index, end]);
+        yIniSet = yIniSet([1, mid_left_point_index, mid_right_point_index, end]);
+    catch
+        error()
+    end
 else
     %% 子情况2：存在相交节点，避开圆角区域
     % 获取相交区域的边界
