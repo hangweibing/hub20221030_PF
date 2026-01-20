@@ -20,7 +20,7 @@ rng(SIM_SEED);    % 设置全局随机数种子
 
 % 基本粒子滤波参数
 n = 1;                                    % 状态向量的维度（每个粒子）
-N = 1000;                                  % 粒子数量
+N = 20000;                                  % 粒子数量
 v_sphere = 2;                             % 一维空间维度参数
 
 % 正则化粒子滤波参数计算
@@ -63,13 +63,8 @@ std_Kc = 3.34 ;                           % 断裂韧性标准差 (MPa√m)
 % z      =[2.4882E+00 2.9894E+00 4.0190E+00 5.46751 7.2212E+00 10.4231 1.3130E+01 1.6057E+01 2.0226E+01 2.1715E+01 2.2903E+01 2.3452E+01]+30;
 
 % 实际使用的观测数据（简化版）
-<<<<<<< Updated upstream
-t_check = [5.8741E+01 1.3869E+02  2.1810E+02 2.4204E+02 2.8120E+02];
-z       = [2.4882E+00 4.0190E+00  1.3130E+01 1.6057E+01 2.0226E+01] + 30;
-=======
-t_check = [5.8741E+01 9.9534E+01 1.3869E+02  171.873 203.419 2.1810E+02 2.4204E+02 2.8120E+02];
-z       = [2.4882E+00 2.9894E+00 4.0190E+00  5.46751 10.4231 1.3130E+01 1.6057E+01 2.0226E+01] + 30;
->>>>>>> Stashed changes
+t_check = [5.8741E+01 9.9534E+01 1.3869E+02  1.8275E+02 2.4204E+02 2.8120E+02];
+z       = [2.4882E+00 2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
 
 % 观测相关参数
 zPred = zeros(N, 1);                     % 预测观测值
@@ -105,19 +100,6 @@ zIniRegSet = zeros(1, n_nodes);          % 初始z坐标集
 for i = 1:N   % 遍历所有粒子
     %% 参数采样（NASGRO(H-S)模型四参数）
     % logD: 均匀分布 
-<<<<<<< Updated upstream
-    logD = unifrnd(-9.0, -8.8, 1, 1);
-    
-    % A: 均匀分布 
-    A = unifrnd(35, 60, 1, 1);
-    
-    % delta_kthr: 均匀分布
-    delta_kthr = unifrnd(0.08, 1.2, 1, 1);
-    
-    % p: 正态分布 
-    p = normrnd(2.12, 0.04, 1, 1);
-
-=======
     logD = unifrnd(-10.5, -9.00, 1, 1);
     
     % A: 均匀分布 
@@ -129,7 +111,6 @@ for i = 1:N   % 遍历所有粒子
     % p: 正态分布 
     % p = normrnd(2.12, 0.04, 1, 1);
     p = unifrnd(1.80, 2.18, 1, 1);
->>>>>>> Stashed changes
     %% 几何参数采样（裂纹尺寸）
     a = normrnd(2, 0.05, 1, 1);  % 裂纹半径（均值2mm，标准差0.05mm）
     c = a;                        % 设置为圆形（c = a）
@@ -159,6 +140,9 @@ pparticles(:, 1) = xparticle(:, 46, 1);            % p参数（NASGRO模型）
 
 % 初始化粒子权重（均匀分布）
 weight(:, 1) = 1/N * ones(N, 1);
+
+% 初始化粒子坐标信息存储（cell数组，1×N，每列保存一个粒子的坐标历史）
+particles_coordinates = cell(1, N);
 
 % 计算初始滤波估计（各参数的均值）
 Xpf(:, 1) = (mean(xparticle(:, :, 1)))';
@@ -245,13 +229,8 @@ testErrSet = [0.019803420755871 0.058377623733943 0.013343080193008 ...
 DEBUG_MODE = true;                    % 设置为 true 开启debug模式，false 关闭
 
 % Debug模式参数（仅在DEBUG_MODE=true时生效）
-<<<<<<< Updated upstream
-DEBUG_PARTICLE_IDX = 100;               % 需要跟踪绘制的粒子编号（1~N）
-DEBUG_PLOT_INTERVAL = 5;             % 绘图间隔：每隔多少次while循环保存一次图像
-=======
 DEBUG_PARTICLE_IDX = 228;               % 需要跟踪绘制的粒子编号（1~N）
-DEBUG_PLOT_INTERVAL = 15;             % 绘图间隔：每隔多少次while循环保存一次图像
->>>>>>> Stashed changes
+DEBUG_PLOT_INTERVAL = 10;             % 绘图间隔：每隔多少次while循环保存一次图像
 
 % Debug模式计数器初始化
 if DEBUG_MODE
@@ -263,8 +242,6 @@ end
 %% ===================================================================
 %% 粒子滤波主循环
 %% ===================================================================
-
-
 
 % 分裂状态临时存储
 SPLITTE_temp = zeros(1, N);
@@ -303,8 +280,8 @@ while (m-1)*step/1950.70866 <= t_check(end)
     %% 粒子预测步骤（对每个粒子进行状态更新）
     %% ===================================================================
 
-    % 初始化当前时间步的K值存储（parfor兼容）
-    particles_K_max_temp = zeros(N, 1);
+    % 初始化当前时间步的K值存储
+    particles_deltaK_max_temp = zeros(N, 1);
     
     parfor (i = 1:N)
         %% 粒子级变量初始化
@@ -371,6 +348,9 @@ while (m-1)*step/1950.70866 <= t_check(end)
         yRegSet = xparticlei(1:21);     % y坐标集（21个节点）
         zRegSet = xparticlei(22:42);    % z坐标集（21个节点）
 
+        % 保存当前粒子的坐标信息（第m次更新前的[y,z]坐标）
+        particles_coordinates{i} = [particles_coordinates{i}; [yRegSet, zRegSet]];
+
         % NASGRO(H-S)模型参数
         logD = xparticlei(43);           % NASGRO模型参数logD
         A = xparticlei(44);              % NASGRO模型参数A
@@ -383,10 +363,10 @@ while (m-1)*step/1950.70866 <= t_check(end)
         %% 调用预测模型更新粒子状态
         [yRegSet, zRegSet, SPLITTED, logD, A, delta_kthr, p, deltaKSet] = ...
             a2aNew(yRegSet, zRegSet, aver_delta_sigma, aver_R_set(m-1), m_name, ...
-                   curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet);
-        
+                   curUinput, curAverInput, logD, A, delta_kthr, p, step, testErrSet, i);
+
         %% 存储当前粒子的100%分位数应力强度因子
-        particles_K_max_temp(i) = max(deltaKSet);
+        particles_deltaK_max_temp(i) = max(deltaKSet);
 
         %% 更新粒子状态（parfor兼容：直接确保实数）
         % 原方案: xparticle(i, :, m) = [...]; xparticle = real(xparticle);
@@ -395,13 +375,6 @@ while (m-1)*step/1950.70866 <= t_check(end)
         xparticle(i, :, m) = real([yRegSet, zRegSet, logD, A, delta_kthr, p]);
         SPLITTE_temp(i) = SPLITTED;      % 更新分裂状态
     end
-<<<<<<< Updated upstream
-    
-    % 将parfor循环中的K值复制到主数组
-    particles_K_max = particles_K_max_temp;
-
-    %% 计算粒子滤波统计量
-=======
 
     % Debug模式：统一保存所有粒子的坐标信息
     if DEBUG_MODE
@@ -409,7 +382,6 @@ while (m-1)*step/1950.70866 <= t_check(end)
     end
 
     % 计算粒子滤波统计量
->>>>>>> Stashed changes
     weight(:, m) = 1/N * ones(N, 1);             % 均匀权重初始化
     Xpf(:, m) = (mean(xparticle(:, :, m)))';     % 状态均值估计
     xparticle_cov(:, :, m) = cov(xparticle(:, :, m)); % 状态协方差
@@ -468,27 +440,12 @@ while (m-1)*step/1950.70866 <= t_check(end)
             D(i, m) = sqrt(xparticle_cov(i, i, m));      % 标准差
             e(:, i, m) = kernelsampling(N)';             % 核采样扰动
         end
-<<<<<<< Updated upstream
-        outindex = randomr(weight(:, m));                % 按权重重采样
-        xparticle(:, :, m) = xparticle(outindex, :, m); 
-        % 已注释：传统重采样方法
-        % xparticle1(:,:,m)=xparticle(outindex,:,m);                                 % 重采样
-        % for i=1:44
-        %     xparticle(:,i,m)=xparticle1(:,i,m)+h*D(i,m)*e(:,i,m);              % 扰动
-        %     xparticle(:,i,m)=rearrange(xparticle(:,i,m),xparticle1(:,i,m))';     % 参考文献：Dynamic Bayesian Network for Aircraft Wing Health Monitoring Digital Twin
-        % end
-        % for i=1:N
-        %     [yNewSet,zNewSet,SPLITTE_temp(i)]=addConstraintNewSatgeFunc(xparticle(i,1:21,m),xparticle(i,22:42,m));
-        %     [xparticle(i,1:21,m),xparticle(i,22:42,m),~] = crackRegular5Func(yNewSet,zNewSet,nRegPoint,'false');
-        % end
-=======
         % outindex = randomr(weight(:, m));                % 按权重重采样
         outindex = randomr(weight(:, m));  % 按权重重采样，使用确定性种子
         xparticle(:, :, m) = xparticle(outindex, :, m);
 
         % 重采样后清空粒子坐标历史，重新开始记录
         particles_coordinates = cell(1, N); 
->>>>>>> Stashed changes
 
         j = j + 1;  % 观测计数器递增
     end
@@ -507,15 +464,12 @@ while (m-1)*step/1950.70866 <= t_check(end)
             
             % 计算当前飞行小时数
             current_flight_hours = (m-1)*step/1950.70866;
-            
+
             % 调用绘图函数
-            try
-                plotCrackCoordinates(yDebugSet, zDebugSet, DEBUG_PARTICLE_IDX, m, current_flight_hours);
-                fprintf('  [Debug] 已绘制粒子 %d 在时间步 %d (%.2f小时) 的裂纹图像\n', ...
-                    DEBUG_PARTICLE_IDX, m, current_flight_hours);
-            catch ME
-                warning('Debug绘图失败 (时间步 %d): %s', m, ME.message);
-            end
+            plotCrackCoordinates(yDebugSet, zDebugSet, DEBUG_PARTICLE_IDX, m, current_flight_hours);
+            fprintf('  [Debug] 已绘制粒子 %d 在时间步 %d (%.2f小时) 的裂纹图像\n', ...
+                DEBUG_PARTICLE_IDX, m, current_flight_hours);
+
             
             % 重置计数器
             debug_plot_counter = 0;

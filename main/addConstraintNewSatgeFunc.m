@@ -72,17 +72,49 @@ if(isempty(minYloca) && zNewSet(end) <= 35)
     % 清理超过上边界(y>13)的点
     max_y_loca = find(yNewSet > 13);  % 查找超过上边界(y>13)的点
     if ~isempty(max_y_loca)
-        % 保留从开始到第一个大y值位置的部分
-        zNewSet = zNewSet(1:max_y_loca(1));
-        yNewSet = yNewSet(1:max_y_loca(1));
+        % 保留从开始到第一个违规点之前的数据
+        first_violation = max_y_loca(1);
+        if first_violation > 1
+            zNewSet = zNewSet(1:first_violation-1);
+            yNewSet = yNewSet(1:first_violation-1);
+        end
     end
 
     % 调整末端点到上边界（在清理后进行）
     % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], 13, 'linear', 'extrap'); % 基于y坐标插值调整z值
     yNewSet(end) = 13;  % 固定末端y坐标到上边界
 
-    % 确保起始点固定在左边界
     zNewSet(1) = 30;  % 再次确保起始z坐标在左边界
+
+    % 检查中间的点是否超出圆弧限制，如果超出，剔除这个点
+    downCenter = [37.82842712, 6];      % 下圆角圆心坐标
+    upCenter = [37.82842712, 14];       % 上圆角圆心坐标
+    radius = 3;                         % 圆弧半径
+
+    % 检查圆弧区域内的点是否超出边界
+    violation_indices = [];
+    for i = 1:length(yNewSet)
+        z = zNewSet(i);
+        y = yNewSet(i);
+        if z > 35 && z < 37.82842712
+            % 计算该z坐标对应的上边界和下边界y值
+            y_upper_boundary = upCenter(2) - sqrt(radius^2 - (z - upCenter(1))^2);
+            y_lower_boundary = downCenter(2) + sqrt(radius^2 - (z - downCenter(1))^2);
+
+            % 检查点是否超出边界
+            if y > y_upper_boundary || y < y_lower_boundary
+                violation_indices = [violation_indices, i];
+            end
+        end
+    end
+
+    % 如果有违规点，直接剔除这些违规点
+    if ~isempty(violation_indices)
+        % 从数组中移除违规点的索引
+        keep_indices = setdiff(1:length(zNewSet), violation_indices);
+        zNewSet = zNewSet(keep_indices);
+        yNewSet = yNewSet(keep_indices);
+    end
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -97,16 +129,40 @@ if(isempty(minYloca) && zNewSet(end) <= 35)
 
 %% 分支2：
 elseif(~isempty(minYloca) && zNewSet(end) <= 35)
-    lastIndex = minYloca(end);  % 最后一个最小y位置的索引
-    % 计算新的起始z坐标（在y=7处）
-    newZstart = interp1([yNewSet(lastIndex), yNewSet(lastIndex+1)], [zNewSet(lastIndex), zNewSet(lastIndex+1)], 7, 'linear', 'extrap');
+    % 原方法：基于minYloca找到最后一个最小y位置，然后插值计算起始点
+    % lastIndex = minYloca(end);  % 最后一个最小y位置的索引
+    % % 计算新的起始z坐标（在y=7处）
+    % newZstart = interp1([yNewSet(lastIndex), yNewSet(lastIndex+1)], [zNewSet(lastIndex), zNewSet(lastIndex+1)], 7, 'linear', 'extrap');
+    %
+    % % 重构z坐标数组，从新的起始点开始
+    % zNewSet = [newZstart, zNewSet(lastIndex+1:end)];
+    % % 调整末端点到上边界
+    % [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    % % 重构y坐标数组，从y=7开始
+    % yNewSet = [7, yNewSet(lastIndex+1:end)];
 
-    % 重构z坐标数组，从新的起始点开始
-    zNewSet = [newZstart, zNewSet(lastIndex+1:end)];
+    % 过滤超过下边界的点
+    min_y_loca = find(yNewSet < 7);  % 查找超过下边界(y<7)的点
+    if ~isempty(min_y_loca)
+        % 保留从最后一个小y值位置到末尾的部分
+        zNewSet = zNewSet(min_y_loca(end):end);
+        yNewSet = yNewSet(min_y_loca(end):end);
+    end
+
+    % 过滤超过上边界的坐标点
+    max_y_loca = find(yNewSet > 13);  % 查找超过上边界(y>13)的点
+    if ~isempty(max_y_loca)
+        % 保留从开始到第一个违规点之前的数据
+        first_violation = max_y_loca(1);
+        if first_violation > 1
+            zNewSet = zNewSet(1:first_violation-1);
+            yNewSet = yNewSet(1:first_violation-1);
+        end
+    end
+
     % 调整末端点到上边界
-    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
-    % 重构y坐标数组，从y=7开始
-    yNewSet = [7, yNewSet(lastIndex+1:end)];
+    yNewSet(end) = 13;  % 固定末端y坐标到上边界
+    yNewSet(1) = 7;  % 确保起始y坐标在下边界
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -119,13 +175,60 @@ elseif(~isempty(minYloca) && zNewSet(end) <= 35)
         % zNewSet
     end
 
-%% 分支3：第二阶段
+%% 分支3：
 elseif(isempty(minYloca) && (35 < zNewSet(end) && zNewSet(end) < 37.82842712) && zNewSet(1) < 30.5)
-    % 调整起始点到下边界
-    % yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap');
-    zNewSet(1) = 30;  % 直接投影坐标，不插值
+    % 原方法：直接调整起始点和末端点
+    % % 调整起始点到下边界
+    % % yNewSet(1) = interp1([zNewSet(1), zNewSet(2)], [yNewSet(1), yNewSet(2)], 30, 'linear', 'extrap');
+    % zNewSet(1) = 30;  % 直接投影坐标，不插值
+    %
+    % % 处理上边界，可能与圆角相交的情况
+    % [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
-    % 处理上边界，可能与圆角相交的情况
+    % 新方法：参考前面分支的过滤和边界计算方法
+    % 对超出左边界的节点进行过滤
+    min_z_loca = find(zNewSet < 30);  % 查找超过左侧边界(z<30)的点
+    if ~isempty(min_z_loca)
+        % 保留从最后一个小z值位置到末尾的部分
+        zNewSet = zNewSet(min_z_loca(end):end);
+        yNewSet = yNewSet(min_z_loca(end):end);
+    end
+
+    % 过滤掉第一个超出圆弧边界的节点
+    downCenter = [37.82842712, 6];      % 下圆角圆心坐标
+    upCenter = [37.82842712, 14];       % 上圆角圆心坐标
+    radius = 3;                         % 圆弧半径
+
+    % 检查每个点是否超出圆弧边界
+    violation_indices = [];
+    for i = 1:length(yNewSet)
+        z = zNewSet(i);
+        y = yNewSet(i);
+        if z > 35  % 注意这里的 z 范围
+
+            % 计算该z坐标对应的上边界和下边界y值
+            y_upper_boundary = upCenter(2) - sqrt(radius^2 - (z - upCenter(1))^2);
+            y_lower_boundary = downCenter(2) + sqrt(radius^2 - (z - downCenter(1))^2);
+            % 检查点是否超出边界
+            if y > y_upper_boundary || y < y_lower_boundary
+                violation_indices = [violation_indices, i];
+            end
+
+        end
+    end
+
+    % 如果有违规点，保留到第一个违规点之前的数据
+    if ~isempty(violation_indices)
+        first_violation = violation_indices(1);
+        if first_violation > 1
+            zNewSet = zNewSet(1:first_violation-1);
+            yNewSet = yNewSet(1:first_violation-1);
+        end
+    end
+
+    zNewSet(1) = 30;  % 确保起始点在左边界
+
+    % 统一计算与上圆弧的交点
     [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
@@ -139,33 +242,48 @@ elseif(isempty(minYloca) && (35 < zNewSet(end) && zNewSet(end) < 37.82842712) &&
         % zNewSet
     end
 
-    % 已注释的备用处理方法
-    % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end),'up'), 'linear', 'extrap');
-    % yNewSet(end) = getEdgeYbyZFunc(zNewSet(end), 'up');
 
 %% 分支4：
 elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(end)>35) && (zNewSet(end)<=37.82842712)
-    % 处理起始点调整
+    % 原方法：基于minYloca进行起始点调整
+    % if ~isempty(minYloca)
+    %     lastIndex = minYloca(end);
+    %     % 计算在y=7处的z坐标
+    %     newZstart = interp1([yNewSet(lastIndex), yNewSet(lastIndex+1)], [zNewSet(lastIndex), zNewSet(lastIndex+1)], 7);
+    %     % 重构坐标数组
+    %     zNewSet = [newZstart, zNewSet(lastIndex+1:end)];
+    %     yNewSet = [7, yNewSet(lastIndex+1:end)];
+    % else
+    %     % 计算新的起始z坐标
+    %     % newZstart = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], 7, 'linear', 'extrap');
+    %     yNewSet = [7, yNewSet(2:end)];% 直接投影，不插值
+    % end
+    %
+    % % 调整末端点到
+    % [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    %
+    % % 检查是否与下圆角相交，如果是则进行前缘分裂处理
+    % [yNewSet, zNewSet, splitted] = resplit_front(yNewSet, zNewSet, downCenter1, r);
+
+    % 新方法：按步骤进行边界处理
+    % （1）当minYloca非空，需要过滤超出下边界的节点
     if ~isempty(minYloca)
-        lastIndex = minYloca(end);
-        % 计算在y=7处的z坐标
-        newZstart = interp1([yNewSet(lastIndex), yNewSet(lastIndex+1)], [zNewSet(lastIndex), zNewSet(lastIndex+1)], 7);
-        % 重构坐标数组
-        zNewSet = [newZstart, zNewSet(lastIndex+1:end)];
-        yNewSet = [7, yNewSet(lastIndex+1:end)];
-    else
-        % 计算新的起始z坐标
-        % newZstart = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], 7, 'linear', 'extrap');
-        yNewSet = [7, yNewSet(2:end)];% 直接投影，不插值
+        min_y_loca = find(yNewSet < 7);  % 查找超过下边界(y<7)的点
+        if ~isempty(min_y_loca)
+            % 保留从最后一个违规点之后的部分，跳过所有违规点
+            last_violation = min_y_loca(end);
+            if last_violation < length(yNewSet)
+                zNewSet = zNewSet(last_violation+1:end);
+                yNewSet = yNewSet(last_violation+1:end);
+            end
+            yNewSet(1) = 7;
+        end
     end
 
-    % 调整末端点到上圆角
-    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    if isempty(minYloca)
+        yNewSet(1) = 7;  % 直接设置第一个点的y坐标为7
+    end
 
-<<<<<<< Updated upstream
-    % 检查是否与下圆角相交，如果是则进行前缘分裂处理
-    [yNewSet, zNewSet, splitted] = resplit_front(yNewSet, zNewSet, downCenter1, r);
-=======
     max_y_loca = find(zNewSet > 37.82842712 & yNewSet > 11);  % 查找z>37.82842712且y>11的点
     if ~isempty(max_y_loca)
         % 保留从开始到第一个违规点之前的数据
@@ -236,7 +354,6 @@ elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(
             [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
         end
     end
->>>>>>> Stashed changes
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -251,27 +368,95 @@ elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(
     
 %% 分支5：
 elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.82842712)
-    newLeftPoint = 0;  % 新的左边界点索引
+    % 原方法：基于圆内圆外过渡点调整起始点
+    % newLeftPoint = 0;  % 新的左边界点索引
+    %
+    % % 检查哪些点在下圆角内
+    % judge = zeros(1, n_reg_point);
+    % for i = 1:length(yNewSet)
+    %     judge(i) = isPointInCircleFunc([yNewSet(i), zNewSet(i)], downCenter1, r);
+    %     % 寻找从圆内到圆外的过渡点
+    %     if(i > 1 && judge(i) == false && judge(i-1) == true)
+    %         newLeftPoint = i - 1;
+    %     end
+    % end
+    %
+    % % 如果找到过渡点，调整起始点到圆角边界
+    % if(newLeftPoint > 0)
+    %     [yNewStart, zNewStart] = getEdgeYbyZFunc(zNewSet(newLeftPoint), 'down', yNewSet(newLeftPoint));
+    %     zNewSet = [zNewStart, zNewSet(newLeftPoint+1:end)];
+    %     yNewSet = [yNewStart, yNewSet(newLeftPoint+1:end)];
+    % end
+    %
+    % % 调整末端点到上圆角
+    % [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
-    % 检查哪些点在下圆角内
-    judge = zeros(1, n_reg_point);
+    % 新方法：分别过滤下圆弧和上圆弧边界外的点
+    % 圆心坐标和半径（与checkBoundaryViolation.m保持一致）
+    downCenter = [37.82842712, 6];      % 下圆角圆心坐标
+    upCenter = [37.82842712, 14];       % 上圆角圆心坐标
+    radius = 3;                         % 圆弧半径
+
+    % （1）过滤超出下圆弧边界的点
+    lower_violation_indices = [];
     for i = 1:length(yNewSet)
-        judge(i) = isPointInCircleFunc([yNewSet(i), zNewSet(i)], downCenter1, r);
-        % 寻找从圆内到圆外的过渡点
-        if(i > 1 && judge(i) == false && judge(i-1) == true)
-            newLeftPoint = i - 1;
+        z = zNewSet(i);
+        y = yNewSet(i);
+        if z > 35 && z < 37.82842712
+            % 计算该z坐标对应的下边界y值
+            y_lower_boundary = downCenter(2) + sqrt(radius^2 - (z - downCenter(1))^2);
+
+            % 检查点是否超出下边界
+            if y < y_lower_boundary
+                lower_violation_indices = [lower_violation_indices, i];
+            end
         end
     end
 
-    % 如果找到过渡点，调整起始点到圆角边界
-    if(newLeftPoint > 0)
-        [yNewStart, zNewStart] = getEdgeYbyZFunc(zNewSet(newLeftPoint), 'down', yNewSet(newLeftPoint));
-        zNewSet = [zNewStart, zNewSet(newLeftPoint+1:end)];
-        yNewSet = [yNewStart, yNewSet(newLeftPoint+1:end)];
+    % 如果有下边界违规点，保留最后一个违规点之后的数据
+    if ~isempty(lower_violation_indices)
+        last_violation = lower_violation_indices(end);
+        if last_violation < length(zNewSet)
+            zNewSet = zNewSet(last_violation+1:end);
+            yNewSet = yNewSet(last_violation+1:end);
+        end
     end
 
-    % 调整末端点到上圆角
-    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    % （2）过滤超出上圆弧边界的点
+    upper_violation_indices = [];
+    for i = 1:length(yNewSet)
+        z = zNewSet(i);
+        y = yNewSet(i);
+        if z > 35 && z < 37.82842712
+            % 计算该z坐标对应的上边界y值
+            y_upper_boundary = upCenter(2) - sqrt(radius^2 - (z - upCenter(1))^2);
+
+            % 检查点是否超出上边界
+            if y > y_upper_boundary
+                upper_violation_indices = [upper_violation_indices, i];
+            end
+        end
+    end
+
+    % 如果有上边界违规点，保留到第一个违规点之前的数据
+    if ~isempty(upper_violation_indices)
+        first_violation = upper_violation_indices(1);
+        if first_violation > 1
+            zNewSet = zNewSet(1:first_violation-1);
+            yNewSet = yNewSet(1:first_violation-1);
+        end
+    end
+
+    % （3）计算和上下圆弧的交点：起始点与下圆弧相交，末端点与上圆弧相交
+    if ~isempty(zNewSet)
+        % 起始点与下圆弧相交
+        if length(zNewSet) > 1
+            [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
+        end
+
+        % 末端点与上圆弧相交
+        [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    end
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -290,16 +475,73 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712 && zNewSet(1) > 35 && zN
 
 %% 分支6：
 elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712) && (zNewSet(1) >= 37.82842712)
-    % 首先清理多余的直线部分
-    min_y_loca = find(yNewSet < 9);  % 查找y坐标小于9的位置（接近左边界）
+    % 原方法：清理直线部分并调整末端点
+    % % 首先清理多余的直线部分
+    % min_y_loca = find(yNewSet < 9);  % 查找y坐标小于9的位置（接近左边界）
+    % if ~isempty(min_y_loca)
+    %     % 保留从最后一个小y值位置到末尾的部分
+    %     zNewSet = zNewSet(min_y_loca(end):end);
+    %     yNewSet = yNewSet(min_y_loca(end):end);
+    % end
+    %
+    % % 调整末端点到上圆角
+    % [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+
+    % 新方法：系统化的边界处理
+    % （1）过滤点，保留最后一个越过下边界y=9之后的点
+    % 查找y坐标小于9的点（越过下边界）
+    min_y_loca = find(yNewSet < 9);
     if ~isempty(min_y_loca)
-        % 保留从最后一个小y值位置到末尾的部分
-        zNewSet = zNewSet(min_y_loca(end):end);
-        yNewSet = yNewSet(min_y_loca(end):end);
+        % 保留从最后一个越过下边界点之后的部分
+        last_boundary_cross = min_y_loca(end);
+        if last_boundary_cross < length(yNewSet)
+            zNewSet = zNewSet(last_boundary_cross+1:end);
+            yNewSet = yNewSet(last_boundary_cross+1:end);
+        end
     end
 
-    % 调整末端点到上圆角
-    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    % （2）过滤超出圆弧范围的点，保留第一个超出范围之前的点
+    % 圆心坐标和半径（与checkBoundaryViolation.m保持一致）
+    downCenter = [37.82842712, 6];      % 下圆角圆心坐标
+    upCenter = [37.82842712, 14];       % 上圆角圆心坐标
+    radius = 3;                         % 圆弧半径
+
+    % 检查圆弧区域内的点是否超出边界
+    violation_indices = [];
+    for i = 1:length(yNewSet)
+        z = zNewSet(i);
+        y = yNewSet(i);
+        if z > 35 && z < 37.82842712
+            % 计算该z坐标对应的上边界和下边界y值
+            y_upper_boundary = upCenter(2) - sqrt(radius^2 - (z - upCenter(1))^2);
+            y_lower_boundary = downCenter(2) + sqrt(radius^2 - (z - downCenter(1))^2);
+
+            % 检查点是否超出边界
+            if y > y_upper_boundary || y < y_lower_boundary
+                violation_indices = [violation_indices, i];
+            end
+        end
+    end
+
+    % 如果有违规点，保留到第一个违规点之前的数据
+    if ~isempty(violation_indices)
+        first_violation = violation_indices(1);
+        if first_violation > 1
+            zNewSet = zNewSet(1:first_violation-1);
+            yNewSet = yNewSet(1:first_violation-1);
+        end
+    end
+
+    % （3）定位和下边界以及上圆弧的交点
+    % 设置起始点到下边界（y=9）
+    if ~isempty(yNewSet)
+        yNewSet(1) = 9;  % 第三区域的下边界是y=9
+    end
+
+    % 设置末端点到上圆弧
+    if ~isempty(zNewSet) && zNewSet(end) < 37.82842712
+        [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    end
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -314,21 +556,23 @@ elseif(zNewSet(end) > 35 && zNewSet(end) <= 37.82842712) && (zNewSet(1) >= 37.82
     
 %% 分支7：
 elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
-    % 处理起始点调整到左边界
+    % 处理起始点调整
     if ~isempty(minYloca)
-        lastIndex = minYloca(end);
-        newZstart = interp1([yNewSet(lastIndex), yNewSet(lastIndex+1)], [zNewSet(lastIndex), zNewSet(lastIndex+1)], 7);
-        zNewSet = [newZstart, zNewSet(lastIndex+1:end)];
-        yNewSet = [7, yNewSet(lastIndex+1:end)];
+        % 过滤超过下边界的点，保留最后一个违规点之后的数据
+        min_y_loca = find(yNewSet < 7);  % 查找超过下边界(y<7)的点
+        if ~isempty(min_y_loca)
+            % 保留从最后一个违规点之后的部分
+            last_violation = min_y_loca(end);
+            if last_violation < length(yNewSet)
+                zNewSet = zNewSet(last_violation+1:end);
+                yNewSet = yNewSet(last_violation+1:end);
+            end
+        end
+        % 设置起始点到下边界
+        if ~isempty(yNewSet)
+            yNewSet(1) = 7;
+        end
     else
-<<<<<<< Updated upstream
-        % newZstart = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], 7, 'linear', 'extrap');
-        yNewSet = [7, yNewSet(2:end)];% 直接投影，不插值
-    end
-
-    % 调整末端点到上边界
-    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
-=======
         % 过滤超过左边界的点，保留最后一个违规点之后的数据
         min_z_loca = find(zNewSet < 30);  % 查找超过左侧边界(z<30)的点
         if ~isempty(min_z_loca)
@@ -366,7 +610,6 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
     for i = 1:n_points
         in_circle(i) = isPointInCircleFunc([yNewSet(i), zNewSet(i)], downCenter1, r);
     end
->>>>>>> Stashed changes
 
     % 检测是否出现圆内点，只要有任何一个点在圆弧内就触发split处理
     has_split_pattern = any(in_circle);
@@ -399,28 +642,98 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
 
 %% 分支8：
 elseif(zNewSet(end) > 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.82842712)
-    newLeftPoint = 0;  % 新的左边界点
+    % 原方法：基于圆内圆外过渡点调整起始点
+    % newLeftPoint = 0;  % 新的左边界点
+    % judge = zeros(1, n_reg_point);
+    % for i = 1:length(yNewSet)
+    %     judge(i) = isPointInCircleFunc([yNewSet(i), zNewSet(i)], downCenter1, r);
+    %     if(i > 1 && judge(i) == false && judge(i-1) == true)
+    %         newLeftPoint = i - 1;
+    %     end
+    % end
+    % if(newLeftPoint > 0)
+    %     [yNewStart, zNewStart] = getEdgeYbyZFunc(zNewSet(newLeftPoint), 'down', yNewSet(newLeftPoint));
+    %     zNewSet = [zNewStart, zNewSet(newLeftPoint+1:end)];
+    %     yNewSet = [yNewStart, yNewSet(newLeftPoint+1:end)];
+    % end
+    % [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
 
-    % 检查点与下圆角的相对位置
-    judge = zeros(1, n_reg_point);
+    % 新方法：系统化的边界过滤和交点计算
+    % （1）过滤在圆弧外的点
+    downCenter = [37.82842712, 6];      % 下圆角圆心坐标
+    upCenter = [37.82842712, 14];       % 上圆角圆心坐标
+    radius = 3;                         % 圆弧半径
+
+    % 检查圆弧区域内的点是否超出边界
+    violation_indices = [];
     for i = 1:length(yNewSet)
-        judge(i) = isPointInCircleFunc([yNewSet(i), zNewSet(i)], downCenter1, r);
-        % 寻找从圆内到圆外的过渡点
-        if(i > 1 && judge(i) == false && judge(i-1) == true)
-            newLeftPoint = i - 1;
+        z = zNewSet(i);
+        y = yNewSet(i);
+        if z > 35 && z <= 37.82842712
+            % 计算该z坐标对应的上边界和下边界y值
+            y_upper_boundary = upCenter(2) - sqrt(radius^2 - (z - upCenter(1))^2);
+            y_lower_boundary = downCenter(2) + sqrt(radius^2 - (z - downCenter(1))^2);
+
+            % 检查点是否超出边界
+            if y > y_upper_boundary || y < y_lower_boundary
+                violation_indices = [violation_indices, i];
+            end
         end
     end
 
-    % 调整起始点到圆角边界
-    if(newLeftPoint > 0)
-        [yNewStart, zNewStart] = getEdgeYbyZFunc(zNewSet(newLeftPoint), 'down', yNewSet(newLeftPoint));
-        zNewSet = [zNewStart, zNewSet(newLeftPoint+1:end)];
-        yNewSet = [yNewStart, yNewSet(newLeftPoint+1:end)];
+    % 如果有违规点，保留最后一个违规点之后的数据
+    if ~isempty(violation_indices)
+        last_violation = violation_indices(end);
+        if last_violation < length(zNewSet)
+            zNewSet = zNewSet(last_violation+1:end);
+            yNewSet = yNewSet(last_violation+1:end);
+        end
     end
 
-    % 调整末端点到上边界（使用插值方法）
-    % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
-    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    % 判断在z >= 37.82842712的区域，是否存在点在下边界（y=9）之外
+    min_y_loca_region3 = find(zNewSet >= 37.82842712 & yNewSet < 9);  % 查找z>=37.82842712且y<9的点
+    if ~isempty(min_y_loca_region3)
+        % 保留最后一个违规点之后的数据
+        last_violation_region3 = min_y_loca_region3(end);
+        if last_violation_region3 < length(zNewSet)
+            zNewSet = zNewSet(last_violation_region3+1:end);
+            yNewSet = yNewSet(last_violation_region3+1:end);
+        end
+    end
+
+    % 过滤上边界之外的点
+    % 对于z >= 37.82842712的区域，上边界是y=11
+    max_y_loca = find(zNewSet >= 37.82842712 & yNewSet > 11);  % 查找z>=37.82842712且y>11的点
+    if ~isempty(max_y_loca)
+        % 保留从开始到第一个违规点之前的数据
+        first_violation = max_y_loca(1);
+        if first_violation > 1
+            zNewSet = zNewSet(1:first_violation-1);
+            yNewSet = yNewSet(1:first_violation-1);
+        end
+    end
+
+    % 计算和圆弧和上边界的交点
+    if ~isempty(zNewSet)
+        % 起始点：根据z坐标位置决定与哪个边界求交点
+        if length(zNewSet) > 1
+            if zNewSet(1) < 37.82842712
+                % 在圆弧区域，与圆弧求交点
+                [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
+            end
+        end
+
+        % 末端点：根据z坐标位置决定与哪个边界求交点
+        if length(zNewSet) > 1
+            if zNewSet(end) < 37.82842712
+                % 在圆弧区域，与圆弧求交点
+                [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+            else
+                % 在第三区域，直接设置到上边界（y=11）
+                yNewSet(end) = 11;
+            end
+        end
+    end
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -443,31 +756,55 @@ elseif(zNewSet(end) > 37.82842712 && zNewSet(1) > 35 && zNewSet(1) <= 37.8284271
     
 %% 分支9：
 elseif zNewSet(end) > 37.82842712 && zNewSet(1) > 37.82842712  % 20220915 修改：上边界区域的处理
-    % 清理左边界多余部分
-    min_y_loca = find(yNewSet < 9);  % 查找接近左边界(y<9)的点
+    % 原方法：清理边界并调整端点
+    % min_y_loca = find(yNewSet < 9);  % 查找接近左边界(y<9)的点
+    % if ~isempty(min_y_loca)
+    %     zNewSet = zNewSet(min_y_loca(end):end);
+    %     yNewSet = yNewSet(min_y_loca(end):end);
+    % end
+    %
+    % max_y_loca = find(yNewSet > 11);  % 查找超过右边界(y>11)的点
+    % if ~isempty(max_y_loca)
+    %     zNewSet = zNewSet(1:max_y_loca(1));
+    %     yNewSet = yNewSet(1:max_y_loca(1));
+    % end
+    %
+    % [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
+    % [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+
+    % 新方法：参考前面的系统化边界过滤
+    % 过滤超过下边界的点，保留最后一个超过下边界之后的点
+    min_y_loca = find(yNewSet < 9);  % 查找超过下边界(y<9)的点
     if ~isempty(min_y_loca)
-        % 保留从最后一个小y值位置到末尾的部分
-        zNewSet = zNewSet(min_y_loca(end):end);
-        yNewSet = yNewSet(min_y_loca(end):end);
+        % 保留从最后一个违规点之后的部分
+        last_violation = min_y_loca(end);
+        if last_violation < length(yNewSet)
+            zNewSet = zNewSet(last_violation+1:end);
+            yNewSet = yNewSet(last_violation+1:end);
+        end
     end
 
-    % 清理右边界多余部分 (220915新增)
-    max_y_loca = find(yNewSet > 11);  % 查找超过右边界(y>11)的点
+    % 过滤超过上边界的点，保留第一个超过上边界之前的点
+    max_y_loca = find(yNewSet > 11);  % 查找超过上边界(y>11)的点
     if ~isempty(max_y_loca)
-        % 保留从开始到第一个大y值位置的部分
-        zNewSet = zNewSet(1:max_y_loca(1));
-        yNewSet = yNewSet(1:max_y_loca(1));
+        % 保留从开始到第一个违规点之前的数据
+        first_violation = max_y_loca(1);
+        if first_violation > 1
+            zNewSet = zNewSet(1:first_violation-1);
+            yNewSet = yNewSet(1:first_violation-1);
+        end
     end
 
-    % 调整起始点到下边界
-    % zNewSet(1) = interp1([yNewSet(1), yNewSet(2)], [zNewSet(1), zNewSet(2)], getEdgeYbyZFunc(zNewSet(1), 'down'), 'linear', 'extrap');
-    [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
+    % 计算交点
+    % 设置起始点到下边界（y=9）
+    if ~isempty(yNewSet)
+        yNewSet(1) = 9;  % 第三区域的下边界是y=9
+    end
 
-    % 调整末端点到上边界（两种插值方法）
-    % zNewSet(end) = interp1([yNewSet(end-2), yNewSet(end-1)], [zNewSet(end-2), zNewSet(end-1)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
-    % 最终调整末端点
-    % zNewSet(end) = interp1([yNewSet(end-1), yNewSet(end)], [zNewSet(end-1), zNewSet(end)], getEdgeYbyZFunc(zNewSet(end), 'up'), 'linear', 'extrap');
-    [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
+    % 设置末端点到上边界（y=11）
+    if ~isempty(yNewSet)
+        yNewSet(end) = 11;  % 第三区域的上边界是y=11
+    end
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
