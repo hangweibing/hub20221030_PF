@@ -37,10 +37,6 @@ if isrow(particles_K_max)
     particles_K_max = particles_K_max';
 end
 
-% 移除 NaN、Inf 值，并只保留大于0的K值
-valid_idx = isfinite(particles_K_max) & (particles_K_max > 0);
-particles_K_max = particles_K_max(valid_idx);
-
 
 %% 可选参数解析
 p = inputParser;
@@ -105,9 +101,9 @@ end
 % 可选：输出统计信息（取消注释以启用）
 fprintf('========== POF 计算统计信息 ==========\n');
 % fprintf('粒子数量:           %d\n', length(particles_K_max));
-fprintf('K_max 均值:         %.4f MPa√m\n', mean(particles_K_max) / sqrt(1000));
-fprintf('K_max 标准差:       %.4f MPa√m\n', std(particles_K_max) / sqrt(1000));
-fprintf('K_max 最大值:       %.4f MPa√m\n', max(particles_K_max) / sqrt(1000));
+fprintf('K_max 均值:         %.4f MPa√m\n', mean(particles_K_max));
+fprintf('K_max 标准差:       %.4f MPa√m\n', std(particles_K_max));
+fprintf('K_max 最大值:       %.4f MPa√m\n', max(particles_K_max));
 fprintf('失效概率 POF:       %.4e\n', POF);
 % fprintf('临界 POF (10^-7):   %.4e\n', 1e-7);
 if POF > 1e-7
