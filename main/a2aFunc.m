@@ -54,21 +54,21 @@ nRegPoint = length(yRegSet);   % 裂纹轮廓节点数量
 yInputSet = yRegSet;
 zInputSet = zRegSet;
 
-%% ===================================================================
-%% POD投影和神经网络预测
-%% ===================================================================
 
 %% POD降维投影
 % 将裂纹几何形状投影到POD基空间进行降维
 inputRegSet = [yRegSet, zRegSet]';  % 组合y和z坐标为输入矩阵
 input = curUinput' * (inputRegSet - curAverInput);  % POD投影，每一列表示一个坐标
 
-%% 神经网络应力强度因子预测
-% 使用训练好的神经网络模型预测各节点的应力强度因子范围
+%% ===================================================================
+%% 神经网络预测K（！！！！！注意单位！！！！！）
+%% ===================================================================
 [deltaKSet] = sim_K_func(m_name, input, aver_delta_sigma, testErrSet);
-%% ===================================================================
-%% NASGRO(H-S)疲劳裂纹扩展定律计算
-%% ===================================================================
+% 计算Kmax：Kmax = deltaK / (1 - R)
+% 注意：deltaKSet的单位是MPa√mm，需要转换为MPa√m（除以sqrt(1000)）
+deltaKSet_vec = deltaKSet';  % 转换为行向量
+deltaKSet_m = deltaKSet_vec / sqrt(1000);  % 从mm单位转换为m单位
+Kmax = deltaKSet_m ./ (1 - aver_R) ;  % Kmax = ΔK / (1 - R)
 
 %% 裂纹几何参数计算
 ksiRegSet = linspace(0, 1, nRegPoint);  % 节点参数化坐标 (0~1)
@@ -81,11 +81,7 @@ a_old = sqrt((yRegSet - y_ini).^2 + (zRegSet - z_ini).^2);  % 当前裂纹尺寸
 % 其中：da-裂纹扩展量，dN-循环次数，ΔK-应力强度因子范围
 %      K_max = ΔK / (1 - R)，其中R为应力比
 
-% 计算Kmax：Kmax = deltaK / (1 - R)
-% 注意：deltaKSet的单位是MPa√mm，需要转换为MPa√m（除以sqrt(1000)）
-deltaKSet_vec = deltaKSet';  % 转换为行向量
-deltaKSet_m = deltaKSet_vec / sqrt(1000);  % 从mm单位转换为m单位
-Kmax = deltaKSet_m ./ (1 - aver_R) ;  % Kmax = ΔK / (1 - R)
+
 
 % 计算分母项：(1 - K_max/A)^0.5，避免负值或零值
 denominator = 1 - Kmax ./ A;

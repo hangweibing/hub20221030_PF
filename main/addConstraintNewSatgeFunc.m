@@ -330,8 +330,30 @@ elseif (~isempty(minYloca) || ((zNewSet(1)>30) && (zNewSet(1)<35))) && (zNewSet(
         [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
     end
 
-    % 使用resplit_front进行分裂处理
-    [yNewSet, zNewSet, splitted] = resplit_front(yNewSet, zNewSet, downCenter1, r);
+    % 检查是否与下圆角相交 - 简化处理方式（参考分支7）
+    % 对每个点判断是否在下圆弧内
+    n_points = length(yNewSet);
+    in_circle = false(n_points, 1);
+    for i = 1:n_points
+        in_circle(i) = isPointInCircleFunc([yNewSet(i), zNewSet(i)], downCenter1, r);
+    end
+
+    % 检测是否出现圆内点，只要有任何一个点在圆弧内就触发split处理
+    has_split_pattern = any(in_circle);
+
+    if has_split_pattern
+        % 出现了split，过滤掉最后一个在圆内的点及其之前的点
+        last_true_idx = find(in_circle, 1, 'last');
+        yNewSet = yNewSet(last_true_idx+1:end);
+        zNewSet = zNewSet(last_true_idx+1:end);
+        n_points = length(yNewSet);
+
+        % 根据第一个剩余点的z坐标找到边界交点（由于分支4的限制，一定在圆弧内）
+        if n_points > 0
+            % 使用getEdgeYbyZFunc函数计算下边界交点
+            [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
+        end
+    end
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -566,7 +588,8 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
             zNewSet(1) = 30;
         end
     end
-    
+
+    % 过滤超过上边界（y=11）的点，保留第一个违规点之前的数据
     max_y_loca = find(zNewSet >= 37.82842712 & yNewSet > 11);  % 查找z>=37.82842712且y>11的点
     if ~isempty(max_y_loca)
         % 保留从开始到第一个违规点之前的数据
@@ -577,17 +600,28 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
         end
     end
 
-    % 设置末端点到上边界
-    if zNewSet(end) < 37.82842712
-        % 在圆弧区域，与上圆弧求交点
-        [yNewSet(end), zNewSet(end)] = getEdgeYbyZFunc(zNewSet(end), 'up', yNewSet(end));
-    else
-        % 在第三区域，直接设置到上边界（y=11）
-        yNewSet(end) = 11;
+    % 直接设置到上边界（y=11）
+    yNewSet(end) = 11;
+
+
+    % 对每个点判断是否在下圆弧内
+    n_points = length(yNewSet);
+    in_circle = false(n_points, 1);
+    for i = 1:n_points
+        in_circle(i) = isPointInCircleFunc([yNewSet(i), zNewSet(i)], downCenter1, r);
     end
 
-    % 检查是否与下圆角相交
-    [yNewSet, zNewSet, splitted] = resplit_front(yNewSet, zNewSet, downCenter1, r);
+    % 检测是否出现圆内点，只要有任何一个点在圆弧内就触发split处理
+    has_split_pattern = any(in_circle);
+
+    if has_split_pattern
+        % 出现了split，过滤掉最后一个在圆内的点及其之前的点
+        last_true_idx = find(in_circle, 1, 'last');
+        yNewSet = yNewSet(last_true_idx+1:end);
+        zNewSet = zNewSet(last_true_idx+1:end);
+        % 根据第一个剩余点的z坐标找到边界交点
+        [yNewSet(1), zNewSet(1)] = getEdgeYbyZFunc(zNewSet(1), 'down', yNewSet(1));
+    end
 
     if ~isreal(yNewSet) || ~isreal(zNewSet)
         warning('检测到复数坐标：yNewSet 或 zNewSet 包含复数');
@@ -599,6 +633,7 @@ elseif(zNewSet(end) > 37.82842712) && (zNewSet(1) <= 35)
         % yNewSet
         % zNewSet
     end
+
 
     % 已注释的备用处理方法
     % [yNewSet(end), zNewSet(end)] = getPointOnCurveFunc([yNewSet(end), zNewSet(end)], [yNewSet(end-1), zNewSet(end-1)]);

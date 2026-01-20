@@ -42,8 +42,8 @@ function plotCrackCoordinates(yNewSet, zNewSet, particle_idx, time_step, flight_
     % 下边界圆弧（圆心[37.82842712, 6]，半径3）
     y_lower_region2 = downCenter(2) + sqrt(radius^2 - (z_region2 - downCenter(1)).^2);
 
-    % 区域3: z从37.82842712到50，y=11和y=9两条直线
-    z_region3 = 37.82842712:0.1:50;
+    % 区域3: z从37.82842712到52，y=11和y=9两条直线
+    z_region3 = 37.82842712:0.1:52;
     y_upper_region3 = 11 * ones(size(z_region3));
     y_lower_region3 = 9 * ones(size(z_region3));
 
@@ -57,8 +57,8 @@ function plotCrackCoordinates(yNewSet, zNewSet, particle_idx, time_step, flight_
     plot(z_boundary, y_lower, 'k-', 'LineWidth', 1);
     
     % 图形设置
-    xlim([30, 50]);
-    ylim([7, 13]);
+    xlim([30, 52]);
+    ylim([6, 14]);
     axis equal;  % 使横纵坐标单位长度相等
     xlabel('z坐标 (mm)', 'FontSize', 12);
     ylabel('y坐标 (mm)', 'FontSize', 12);

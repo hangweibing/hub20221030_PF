@@ -20,7 +20,7 @@ rng(SIM_SEED);    % 设置全局随机数种子
 
 % 基本粒子滤波参数
 n = 1;                                    % 状态向量的维度（每个粒子）
-N = 1000;                                  % 粒子数量
+N = 20000;                                  % 粒子数量
 v_sphere = 2;                             % 一维空间维度参数
 
 % 正则化粒子滤波参数计算
@@ -51,8 +51,8 @@ weight = zeros(N, 1000);                 % 粒子权重
 % POF计算相关变量
 particles_K_max = zeros(N, 1);          % 每个粒子的最大应力强度因子
 POF_array = zeros(1000, 1);              % 失效概率数组（每个时间步）
-mu_Kc = 33.4 * sqrt(1e3);                            % 断裂韧性均值 (MPa√m)
-std_Kc = 3.34 * sqrt(1e3);                           % 断裂韧性标准差 (MPa√m)
+mu_Kc = 33.4 ;                            % 断裂韧性均值 (MPa√m)
+std_Kc = 3.34 ;                           % 断裂韧性标准差 (MPa√m)
 
 %% ===================================================================
 %% 观测数据配置
@@ -63,8 +63,8 @@ std_Kc = 3.34 * sqrt(1e3);                           % 断裂韧性标准差 (MP
 % z      =[2.4882E+00 2.9894E+00 4.0190E+00 5.46751 7.2212E+00 10.4231 1.3130E+01 1.6057E+01 2.0226E+01 2.1715E+01 2.2903E+01 2.3452E+01]+30;
 
 % 实际使用的观测数据（简化版）
-t_check = [9.9534E+01 1.3869E+02  1.8275E+02 2.4204E+02 2.8120E+02];
-z       = [2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
+t_check = [5.8741E+01 9.9534E+01 1.3869E+02  1.8275E+02 2.4204E+02 2.8120E+02];
+z       = [2.4882E+00 2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
 
 % 观测相关参数
 zPred = zeros(N, 1);                     % 预测观测值
@@ -100,17 +100,17 @@ zIniRegSet = zeros(1, n_nodes);          % 初始z坐标集
 for i = 1:N   % 遍历所有粒子
     %% 参数采样（NASGRO(H-S)模型四参数）
     % logD: 均匀分布 
-    logD = unifrnd(-10, -9.00, 1, 1);
+    logD = unifrnd(-10.5, -9.00, 1, 1);
     
     % A: 均匀分布 
-    A = unifrnd(65, 110, 1, 1);
+    A = unifrnd(110, 160, 1, 1);
     
     % delta_kthr: 均匀分布
-    delta_kthr = unifrnd(0.01, 4, 1, 1);
+    delta_kthr = unifrnd(0.1, 1.5, 1, 1);
     
     % p: 正态分布 
     % p = normrnd(2.12, 0.04, 1, 1);
-    p = unifrnd(1.88, 2.55, 1, 1);
+    p = unifrnd(1.80, 2.18, 1, 1);
     %% 几何参数采样（裂纹尺寸）
     a = normrnd(2, 0.05, 1, 1);  % 裂纹半径（均值2mm，标准差0.05mm）
     c = a;                        % 设置为圆形（c = a）
@@ -155,21 +155,10 @@ xparticle_cov(:, :, 1) = cov(xparticle(:, :, 1));
 %% ===================================================================
 % 加载ASTM标准载荷谱数据
 load('AsteixSpectraData.mat');
-
-%% ===================================================================
-%% POD模型数据加载
-%% ===================================================================
-
 load('pod_models.mat'); % 加载POD模型数据
 
-%% ===================================================================
-%% 频谱数据扩展处理
-%% ===================================================================
-
-% 扩展频谱数据以满足长时间计算需求（7倍扩展）
 spectra = [spectra spectra spectra spectra spectra spectra spectra];
-
-% 去除第一个数据点，确保数据对齐
+% 去除第一个数据点
 spectra = spectra(2:end);
 
 %% ===================================================================
@@ -241,7 +230,7 @@ DEBUG_MODE = true;                    % 设置为 true 开启debug模式，false
 
 % Debug模式参数（仅在DEBUG_MODE=true时生效）
 DEBUG_PARTICLE_IDX = 228;               % 需要跟踪绘制的粒子编号（1~N）
-DEBUG_PLOT_INTERVAL = 5;             % 绘图间隔：每隔多少次while循环保存一次图像
+DEBUG_PLOT_INTERVAL = 10;             % 绘图间隔：每隔多少次while循环保存一次图像
 
 % Debug模式计数器初始化
 if DEBUG_MODE
@@ -294,7 +283,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     % 初始化当前时间步的K值存储
     particles_deltaK_max_temp = zeros(N, 1);
     
-    for (i = 1:N)
+    parfor (i = 1:N)
         %% 粒子级变量初始化
         curUinput = {};
         curAverInput = {};
@@ -392,17 +381,18 @@ while (m-1)*step/1950.70866 <= t_check(end)
         save('debug_particles_coordinates.mat', 'particles_coordinates', 'm');
     end
 
-    % 将parfor循环中的 K 值复制到主数组
-    particles_K_max = particles_deltaK_max_temp / (1 - aver_R_set(m-1));
-
-    %% 计算粒子滤波统计量
+    % 计算粒子滤波统计量
     weight(:, m) = 1/N * ones(N, 1);             % 均匀权重初始化
     Xpf(:, m) = (mean(xparticle(:, :, m)))';     % 状态均值估计
     xparticle_cov(:, :, m) = cov(xparticle(:, :, m)); % 状态协方差
     
-    %% 计算当前时间步的失效概率(POF)
+    %% ===================================================================
+    %% 计算POF（！！！！！注意K的单位换算！！！！！）
+    %% ===================================================================
     try
-        POF_array(m) = calculatePOF(particles_K_max, mu_Kc, std_Kc);
+        % deltaK_max 计算出 K_max
+        particles_K_max = particles_deltaK_max_temp / (1 - aver_R_set(m-1));
+        POF_array(m) = calculatePOF(particles_K_max / sqrt(1000), mu_Kc, std_Kc);
     catch ME
         warning('POF计算失败 (时间步 %d): %s', m, ME.message);
         POF_array(m) = 0;  % 失败时设为0
@@ -451,21 +441,11 @@ while (m-1)*step/1950.70866 <= t_check(end)
             e(:, i, m) = kernelsampling(N)';             % 核采样扰动
         end
         % outindex = randomr(weight(:, m));                % 按权重重采样
-        outindex = randomr(weight(:, m), SIM_SEED + m*N);  % 按权重重采样，使用确定性种子
+        outindex = randomr(weight(:, m));  % 按权重重采样，使用确定性种子
         xparticle(:, :, m) = xparticle(outindex, :, m);
 
         % 重采样后清空粒子坐标历史，重新开始记录
         particles_coordinates = cell(1, N); 
-        % 已注释：传统重采样方法
-        % xparticle1(:,:,m)=xparticle(outindex,:,m);                                 % 重采样
-        % for i=1:44
-        %     xparticle(:,i,m)=xparticle1(:,i,m)+h*D(i,m)*e(:,i,m);              % 扰动
-        %     xparticle(:,i,m)=rearrange(xparticle(:,i,m),xparticle1(:,i,m))';     % 参考文献：Dynamic Bayesian Network for Aircraft Wing Health Monitoring Digital Twin
-        % end
-        % for i=1:N
-        %     [yNewSet,zNewSet,SPLITTE_temp(i)]=addConstraintNewSatgeFunc(xparticle(i,1:21,m),xparticle(i,22:42,m));
-        %     [xparticle(i,1:21,m),xparticle(i,22:42,m),~] = crackRegular5Func(yNewSet,zNewSet,nRegPoint,'false');
-        % end
 
         j = j + 1;  % 观测计数器递增
     end
@@ -522,9 +502,9 @@ for i = 1:m-1
     x(i) = (i-1) * step / 1950.70866;                      % 时间轴
 end
 
-%% 观测数据
-t_check = [5.8741E+01 1.3869E+02  2.1810E+02 2.4204E+02 2.8120E+02];
-z       = [2.4882E+00 4.0190E+00  1.3130E+01 1.6057E+01 2.0226E+01] + 30;
+% %% 观测数据
+% t_check = [5.8741E+01 1.3869E+02  2.1810E+02 2.4204E+02 2.8120E+02];
+% z       = [2.4882E+00 4.0190E+00  1.3130E+01 1.6057E+01 2.0226E+01] + 30;
 
 %% 绘制结果 - 裂纹长度图
 figure(1);
