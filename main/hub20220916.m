@@ -138,27 +138,35 @@ end
 %% ===================================================================
 
 % 粒子滤波核心矩阵
-D = zeros(46, 1000);                     % 协方差矩阵的对角线元素（扩展为46维）
-e = zeros(N, 46, 1000);                  % Epanechikov核函数中的扰动项（扩展为46维）
+% 粒子滤波数据存储配置
 cyclesperhour = 1950.70866;              % 每小时循环次数
-Xpf = zeros(46, 1000);                   % 每一时刻的滤波估计值（扩展为46维）
-xparticle = zeros(N, 46, 1000);          % 粒子状态矩阵（扩展为46维以容纳4个NASGRO参数）
-xparticle1 = zeros(N, 46, 1000);         % 重采样后的粒子
-xparticle_cov = zeros(46, 46, 1000);     % 粒子协方差矩阵
+mu_Kc = 33.4 ;                           % 断裂韧性均值 (MPa√m)
+std_Kc = 3.34 ;                          % 断裂韧性标准差 (MPa√m)
 
-% 参数粒子存储
-upcrackparticles = zeros(N, 1000);       % 上表面裂纹粒子
-log_theta1_particles = zeros(N, 1000);   % log_theta1_参数粒子（NASGRO模型）
-theta2_particles = zeros(N, 1000);       % theta2参数粒子（NASGRO模型）
-theta3_particles = zeros(N, 1000);       % theta3参数粒子（NASGRO模型）
-k2_particles = zeros(N, 1000);           % k2参数粒子（NASGRO模型）
-weight = zeros(N, 1000);                 % 粒子权重
+% 使用 matfile 进行增量存储（类似于数据库，数据存储在磁盘上）
+% 避免内存占用过高（原本 10000x46x1000 的矩阵占用 GB 级内存）
+history_file = 'pf_simulation_results.mat';
+if exist(history_file, 'file'), delete(history_file); end
+mfile = matfile(history_file, 'Writable', true);
 
-% POF计算相关变量
-particles_K_max = zeros(N, 1);          % 每个粒子的最大应力强度因子
-POF_array = zeros(1000, 1);              % 失效概率数组（每个时间步）
-mu_Kc = 33.4 ;                            % 断裂韧性均值 (MPa√m)
-std_Kc = 3.34 ;                           % 断裂韧性标准差 (MPa√m)
+% 在磁盘上预分配空间
+mfile.xparticle = zeros(N, 46, 1000);
+mfile.upcrackparticles = zeros(N, 1000);
+mfile.log_theta1_particles = zeros(N, 1000);
+mfile.theta2_particles = zeros(N, 1000);
+mfile.theta3_particles = zeros(N, 1000);
+mfile.k2_particles = zeros(N, 1000);
+mfile.weight = zeros(N, 1000);
+
+% 统计量和观测矩阵（规模较小，可保留在内存中）
+Xpf = zeros(46, 1000);                   % 滤波估计值均值
+xparticle_cov = zeros(46, 46, 1000);     % 协方差矩阵
+POF_array = zeros(1000, 1);              % 失效概率数组
+D = zeros(46, 1000);                     % 协方差对角线（RPF残余）
+
+% 内存中的粒子状态缓冲区（仅保留当前步和下一步，极大地节省 RAM）
+xparticle_curr = zeros(N, 46);
+xparticle_next = zeros(N, 46);
 
 %% ===================================================================
 %% 观测数据配置
@@ -173,8 +181,8 @@ std_Kc = 3.34 ;                           % 断裂韧性标准差 (MPa√m)
 % z       = [2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
 
 % 实际使用的观测数据（钛合金）
-t_check = [1.6869E+02 2.1275E+02  2.7204E+02 3.1120E+02 3.4546E+02];
-z       = [2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
+t_check = [1.3869E+02 2.6275E+02  3.6104E+02 4.7120E+02 5.4146E+02];
+z       = [2.2894E+00 3.8190E+00  5.4212E+00 6.9057E+00 8.9226E+00] + 30;
 
 % 观测相关参数
 zPred = zeros(N, 1);                     % 预测观测值
@@ -232,33 +240,37 @@ for i = 1:N   % 遍历所有粒子
         zIniRegSet(j) = centers(2) + a*cos(thetas(j));
     end
 
-    %% 粒子状态存储
+    %% 粒子状态存储 (存入当前步缓冲区)
     % 完整状态向量：[y坐标集(21), z坐标集(21), log_theta1_, theta2, theta3, k2]
-    xparticle(i, :, 1) = [yIniRegSet, zIniRegSet, log_theta1_, theta2, theta3, k2];
+    xparticle_curr(i, :) = [yIniRegSet, zIniRegSet, log_theta1_, theta2, theta3, k2];
 end
+
+% 将初始时刻数据保存到磁盘
+mfile.xparticle(:, :, 1) = xparticle_curr;
 
 %% ===================================================================
 %% 初始时刻统计量计算
 %% ===================================================================
 
-% 提取各参数的粒子分布
-upcrackparticles(:, 1) = xparticle(:, 42, 1);      % 上表面裂纹长度
-log_theta1_particles(:, 1) = xparticle(:, 43, 1);  % log_theta1_参数（NASGRO模型）
-theta2_particles(:, 1) = xparticle(:, 44, 1);      % theta2参数（NASGRO模型）
-theta3_particles(:, 1) = xparticle(:, 45, 1);      % theta3参数（NASGRO模型）
-k2_particles(:, 1) = xparticle(:, 46, 1);          % k2参数（NASGRO模型）
+% 提取各参数的粒子分布并保存到磁盘
+mfile.upcrackparticles(:, 1) = xparticle_curr(:, 42);      % 上表面裂纹长度
+mfile.log_theta1_particles(:, 1) = xparticle_curr(:, 43);  % log_theta1_参数（NASGRO模型）
+mfile.theta2_particles(:, 1) = xparticle_curr(:, 44);      % theta2参数（NASGRO模型）
+mfile.theta3_particles(:, 1) = xparticle_curr(:, 45);      % theta3参数（NASGRO模型）
+mfile.k2_particles(:, 1) = xparticle_curr(:, 46);          % k2参数（NASGRO模型）
 
-% 初始化粒子权重（均匀分布）
-weight(:, 1) = 1/N * ones(N, 1);
+% 初始化粒子权重并录入磁盘
+current_weight = 1/N * ones(N, 1);
+mfile.weight(:, 1) = current_weight;
 
 % 初始化粒子坐标信息存储（cell数组，1×N，每列保存一个粒子的坐标历史）
 particles_coordinates = cell(1, N);
 
 % 计算初始滤波估计（各参数的均值）
-Xpf(:, 1) = (mean(xparticle(:, :, 1)))';
+Xpf(:, 1) = (mean(xparticle_curr))';
 
 % 计算初始协方差矩阵
-xparticle_cov(:, :, 1) = cov(xparticle(:, :, 1));
+xparticle_cov(:, :, 1) = cov(xparticle_curr);
 
 %% ===================================================================
 %% 数据加载和预处理
@@ -381,8 +393,8 @@ total_tic = tic;  % 初始化总耗时计时器
 while (m-1)*step/1950.70866 <= t_check(end)
     iter_tic = tic;  % 初始化当前步耗时计时器
     %% 时间步数据准备
-    % 获取上一时刻的所有粒子状态
-    xparticlem_1 = xparticle(:, :, m-1);
+    % 获取上一时刻的所有粒子状态 (此时 xparticle_curr 实际上是 m-1 步的结果)
+    xparticle_prev = xparticle_curr;
 
     % 获取当前时间段的平均应力增量
     aver_delta_sigma = aver_delta_sigma_set(m-1);
@@ -391,8 +403,10 @@ while (m-1)*step/1950.70866 <= t_check(end)
     %% 粒子预测步骤（对每个粒子进行状态更新）
     %% ===================================================================
 
-    % 初始化当前时间步的K值存储
+    % 初始化当前时间步临时存储
     particles_deltaK_max_temp = zeros(N, 1);
+    x_next_temp = zeros(N, 46);
+    splitted_update = zeros(1, N);
 
     parfor (i = 1:N)
         try
@@ -401,11 +415,11 @@ while (m-1)*step/1950.70866 <= t_check(end)
             curAverInput = {};
             SPLITTED = SPLITTE_temp(i);  % 获取上一时刻的分裂状态
 
-            %% 为每个并行线程设置独立的随机数流（parfor线程安全）
+            %% 为每个并行线程设置独立的随机数流
             stream = RandStream('mt19937ar', 'Seed', SIM_SEED + i + m*N);
 
             %% 粒子状态提取
-            xparticlei = xparticlem_1(i, :);  % 当前粒子的完整状态向量
+            xparticlei = xparticle_prev(i, :);
 
             % 如果上一时刻已经是NaN，则直接跳过
             if any(isnan(xparticlei))
@@ -420,10 +434,9 @@ while (m-1)*step/1950.70866 <= t_check(end)
             m_index = 0;
             while m_index == 0
                 m_index = getModelIndexFunc(a_up, a_down);
-
                 if m_index == 0
                     tmp_sel = randi(stream, [1, N], 1, 1);
-                    xparticlei = xparticlem_1(tmp_sel, :);
+                    xparticlei = xparticle_prev(tmp_sel, :);
                     if any(isnan(xparticlei)), error('A2A:InvalidParticle', 'Selected NaN'); end
                     a_up = xparticlei(42) - 30;
                     a_down = xparticlei(22) - 30;
@@ -449,6 +462,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
             %% 粒子状态分量提取
             yRegSet = xparticlei(1:21);
             zRegSet = xparticlei(22:42);
+            % 记录坐标历史
             particles_coordinates{i} = [particles_coordinates{i}; [yRegSet, zRegSet]];
 
             log_theta1_ = xparticlei(43);
@@ -462,20 +476,19 @@ while (m-1)*step/1950.70866 <= t_check(end)
                 curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, i);
 
             particles_deltaK_max_temp(i) = deltaKSet(end);
-            xparticle(i, :, m) = real([yRegSet, zRegSet, log_theta1_, theta2, theta3, k2]);
-            SPLITTE_temp(i) = SPLITTED;
+            x_next_temp(i, :) = real([yRegSet, zRegSet, log_theta1_, theta2, theta3, k2]);
+            splitted_update(i) = SPLITTED;
 
         catch ME
-            if strcmp(ME.identifier, 'A2A:InvalidParticle')
-                % 捕获到无效粒子，标记为 NaN 并不参与后续统计
-                xparticle(i, :, m) = NaN;
-                particles_deltaK_max_temp(i) = NaN;
-                SPLITTE_temp(i) = 0;
-            else
-                rethrow(ME);
-            end
+            x_next_temp(i, :) = NaN;
+            particles_deltaK_max_temp(i) = NaN;
+            splitted_update(i) = 0;
         end
     end
+
+    % 更新缓冲区
+    xparticle_curr = x_next_temp;
+    SPLITTE_temp = splitted_update;
 
     % Debug模式：统一保存所有粒子的坐标信息
     if DEBUG_MODE
@@ -483,21 +496,19 @@ while (m-1)*step/1950.70866 <= t_check(end)
     end
 
     % 计算粒子滤波统计量 (排除 NaN 无效粒子)
-    valid_mask = ~isnan(xparticle(:, 1, m));
-    weight(:, m) = 1/N * ones(N, 1);
+    valid_mask = ~isnan(xparticle_curr(:, 1));
+    % 默认本步权重（观测前）为均匀分布
+    current_weight = 1/N * ones(N, 1);
+
     if any(valid_mask)
-        Xpf(:, m) = (mean(xparticle(valid_mask, :, m)))';
-        xparticle_cov(:, :, m) = cov(xparticle(valid_mask, :, m));
+        Xpf(:, m) = (mean(xparticle_curr(valid_mask, :)))';
+        xparticle_cov(:, :, m) = cov(xparticle_curr(valid_mask, :));
     else
         Xpf(:, m) = Xpf(:, m-1); % 如果全部失效，保持不变
     end
 
-    %% ===================================================================
     %% 计算POF（！！！！！注意K的单位换算！！！！！）
-    %% ===================================================================
-
     try
-        % deltaK_max 计算出 K_max
         valid_K = particles_deltaK_max_temp(~isnan(particles_deltaK_max_temp));
         if ~isempty(valid_K)
             particles_K_max_valid = valid_K / (1 - aver_R_set(m-1));
@@ -506,63 +517,44 @@ while (m-1)*step/1950.70866 <= t_check(end)
             POF_array(m) = POF_array(m-1);
         end
     catch ME
-        warning('POF计算失败 (时间步 %d): %s', m, ME.message);
-        POF_array(m) = 0;  % 失败时设为0
+        POF_array(m) = 0;
     end
-
-    %% 提取关键参数的历史记录
-    upcrackparticles(:, m) = xparticle(:, 42, m);      % 上表面裂纹长度
-    log_theta1_particles(:, m) = xparticle(:, 43, m);  % log_theta1_参数（NASGRO模型）
-    theta2_particles(:, m) = xparticle(:, 44, m);      % theta2参数（NASGRO模型）
-    theta3_particles(:, m) = xparticle(:, 45, m);      % theta3参数（NASGRO模型）
-    k2_particles(:, m) = xparticle(:, 46, m);          % k2参数（NASGRO模型）
-    % 可选：根据观测次数调整观测噪声
-    % if j<=4; R=0.5; else R=0.3; end;
 
     %% 观测更新步骤（当到达观测时刻时）
     if ((m-1)*step/1950.70866 < t_check(j)) && (m*step/1950.70866 >= t_check(j))
         %% 计算似然权重
-        for i = 1:N   % 观测更新
-            zPred(i) = upcrackparticles(i, m);
-            if isnan(zPred(i))
-                weight(i, m) = 1e-99; % 对无效粒子赋予极小权重
+        zPred_curr = xparticle_curr(:, 42);
+        weights_temp = zeros(N, 1);
+        for i = 1:N
+            if isnan(zPred_curr(i))
+                weights_temp(i) = 1e-99;
                 continue;
             end
-            z1(i) = z(j) - zPred(i);                  % 观测残差
-            weight(i, m) = inv(sqrt(2*pi*det(R))) * ...
-                exp(-0.5*(z1(i))*inv(R)*(z1(i))') + 1e-99;
+            res = z(j) - zPred_curr(i);
+            weights_temp(i) = (1/sqrt(2*pi*R)) * exp(-0.5*(res^2)/R) + 1e-99;
         end
 
         %% 归一化权重
-        weight(:, m) = weight(:, m) ./ sum(weight(:, m));
+        current_weight = weights_temp ./ sum(weights_temp);
 
         %% 更新状态估计
-        Xpf(:, m) = 0;
-        for i = 1:N
-            Xpf(:, m) = Xpf(:, m) + (weight(i, m) * xparticle(i, :, m))';
-        end
+        Xpf(:, m) = (xparticle_curr' * current_weight);
 
         %% 更新协方差
-        xparticle_cov(:, :, m) = 0;
-        for i = 1:N
-            xparticle_cov(:, :, m) = xparticle_cov(:, :, m) + ...
-                weight(i, m) * (xparticle(i, :, m)' - Xpf(:, m)) * ...
-                (xparticle(i, :, m)' - Xpf(:, m))';
-        end
+        diff = xparticle_curr - Xpf(:, m)';
+        xparticle_cov(:, :, m) = (diff' .* current_weight') * diff;
 
-        %% 正则化重采样
-        for i = 1:44
-            D(i, m) = sqrt(xparticle_cov(i, i, m));      % 标准差
-            e(:, i, m) = kernelsampling(N)';             % 核采样扰动
-        end
-        % outindex = randomr(weight(:, m));                % 按权重重采样
-        outindex = randomr(weight(:, m));  % 按权重重采样，使用确定性种子
-        xparticle(:, :, m) = xparticle(outindex, :, m);
+        % %% 正则化重采样
+        % for i = 1:44
+        %     D(i, m) = sqrt(xparticle_cov(i, i, m));
+        % end
+        outindex = randomr(current_weight);
+        xparticle_curr = xparticle_curr(outindex, :);
+        current_weight = 1/N * ones(N, 1); % 重采样后权重重置
 
-        % 重采样后清空粒子坐标历史，重新开始记录
+        % 重采样后清空粒子坐标历史
         particles_coordinates = cell(1, N);
-
-        j = j + 1;  % 观测计数器递增
+        j = j + 1;
     end
 
     %% ===================================================================
@@ -597,9 +589,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     iter_time = toc(iter_tic);
     total_time = toc(total_tic);
 
-    disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测', ...
-        '，当前步耗时：' num2str(iter_time, '%.2f') 's', ...
-        '，累计总耗时：' num2str(total_time, '%.2f') 's']);
+    disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测，当前步耗时：' num2str(iter_time, '%.2f') 's，累计总耗时：' num2str(total_time, '%.2f') 's']);
 end
 
 %% ===================================================================
@@ -609,9 +599,12 @@ close all
 %% 数据处理
 clear x y_0 y_1 y_2 y_3 y_33 y21 PoF3
 
+% 从磁盘提取历史数据用于后处理
+upcrack_history = mfile.upcrackparticles;
+
 % 计算统计量
 for i = 1:m-1
-    valid_up = upcrackparticles(:, i);
+    valid_up = upcrack_history(:, i);
     valid_up = valid_up(~isnan(valid_up));
     if ~isempty(valid_up)
         y_1(i) = prctile(valid_up, 99.95) - 30;
