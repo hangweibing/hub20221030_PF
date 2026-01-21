@@ -3,7 +3,7 @@
 %% 功能描述：基于POD神经网络模型的裂纹扩展预测核心算法
 %% ===================================================================
 function [yRegSet, zRegSet, SPLITTED, log_theta1_, theta2, theta3, k2, deltaKSet] = ...
-         a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, aver_Smax, m_name, curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, particle_idx)
+    a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, aver_Smax, m_name, curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, particle_idx)
 
 %A2AFUNC 基于当前时刻的裂纹状态和对应模型预测下一时刻的裂纹状态
 %
@@ -65,8 +65,8 @@ input = curUinput' * (inputRegSet - curAverInput);  % POD投影，每一列表�
 %% ===================================================================
 % 使用神经网络计算 deltaK Kmax
 [deltaKSet] = sim_K_func(m_name, input, aver_delta_sigma * 0.367, testErrSet);
-deltaKSet_vec = deltaKSet';  
-deltaKSet_m = deltaKSet_vec / sqrt(1000);  
+deltaKSet_vec = deltaKSet';
+deltaKSet_m = deltaKSet_vec / sqrt(1000);
 
 [Kmax] = sim_K_func(m_name, input, aver_Smax * 0.367, testErrSet);
 Kmax = Kmax / sqrt(1000);
@@ -166,40 +166,57 @@ zOrigSet = zNewSet;
 % 根据边界条件调整裂纹形状，同时检测是否发生分裂
 [yNewSet, zNewSet, SPLITTED] = addConstraintNewSatgeFunc(yNewSet, zNewSet);
 
+%% ===================================================================
+%% 异常状态检查（鲁棒性增强）
+%% ===================================================================
+max_da = max(da);
+
 %% 检查坐标点数量是否过少
 if length(yNewSet) <= 1 || length(zNewSet) <= 1
-    fprintf('  [坐标检查] 粒子%d裂纹坐标点数量过少（仅剩%d个点），正在绘制图像并终止程序...\n', ...
-        particle_idx, min(length(yNewSet), length(zNewSet)));
-    fprintf('  剩余坐标点信息:\n');
-    for k = 1:min(length(yNewSet), length(zNewSet))
-        fprintf('    第%d个点: (z=%.6f, y=%.6f)\n', k, zNewSet(k), yNewSet(k));
+    fprintf('  [坐标检查] 粒子%d裂纹坐标点数量过少（仅剩%d个点），max(da)=%.4f\n', ...
+        particle_idx, min(length(yNewSet), length(zNewSet)), max_da);
+
+    if max_da > 3
+        % 如果是极端参数导致的异常，标记为无效粒子供上层捕捉
+        error('A2A:InvalidParticle', '粒子%d发现极端扩展(max_da=%.2f)导致点数不足，标记为无效粒子。', ...
+            particle_idx, max_da);
+    else
+        % 否则保留原有报错逻辑（通过 fprintf 显示详情并终止）
+        fprintf('  剩余坐标点信息:\n');
+        for k = 1:min(length(yNewSet), length(zNewSet))
+            fprintf('    第%d个点: (z=%.6f, y=%.6f)\n', k, zNewSet(k), yNewSet(k));
+        end
+        % 绘制诊断图形
+        plotCrackCoordinates(yInputSet, zInputSet, particle_idx, -1, -1);
+        plotCrackCoordinates(yOrigSet, zOrigSet, particle_idx, -2, -2);
+        plotCrackCoordinates(yNewSet, zNewSet, particle_idx, -3, -3);
+        error('[坐标检查] 粒子%d裂纹坐标点数量不足（非极端扩展），无法继续计算！', particle_idx);
     end
-    % 绘制最原始输入的图形
-    plotCrackCoordinates(yInputSet, zInputSet, particle_idx, -1, -1);  % 包含粒子编号
-    % 绘制处理前的原始图形
-    plotCrackCoordinates(yOrigSet, zOrigSet, particle_idx, -2, -2);  % 包含粒子编号
-    % 绘制约束处理后的图形
-    plotCrackCoordinates(yNewSet, zNewSet, particle_idx, -3, -3);   % 包含粒子编号
-    error('[坐标检查] 粒子%d裂纹坐标点数量不足，无法继续计算！', particle_idx);
 end
 
 %% 检查边界违规
 [hasViolation, violationInfo] = checkBoundaryViolation(yNewSet, zNewSet);
 if hasViolation
-    fprintf('  [边界检查] 粒子%d发现裂纹坐标超出边界，正在绘制图像并终止程序...\n', particle_idx);
-    fprintf('  违规坐标点详情:\n');
-    for k = 1:length(violationInfo)
-        fprintf('    第%d个点 (z=%.6f, y=%.6f) 在%s: %s\n', ...
-            violationInfo(k).point, violationInfo(k).z, violationInfo(k).y, ...
-            violationInfo(k).region, violationInfo(k).reason);
+    fprintf('  [边界检查] 粒子%d发现裂纹坐标超出边界，max(da)=%.4f\n', particle_idx, max_da);
+
+    if max_da > 3
+        % 如果是极端参数导致的异常，标记为无效粒子供上层捕捉
+        error('A2A:InvalidParticle', '粒子%d检测到极端扩展(max_da=%.2f)导致边界违规，标记为无效粒子。', ...
+            particle_idx, max_da);
+    else
+        % 否则保留原有报错逻辑（通过 fprintf 显示详情并终止）
+        fprintf('  违规坐标点详情:\n');
+        for k = 1:length(violationInfo)
+            fprintf('    第%d个点 (z=%.6f, y=%.6f) 在%s: %s\n', ...
+                violationInfo(k).point, violationInfo(k).z, violationInfo(k).y, ...
+                violationInfo(k).region, violationInfo(k).reason);
+        end
+        % 绘制诊断图形
+        plotCrackCoordinates(yInputSet, zInputSet, particle_idx, -1, -1);
+        plotCrackCoordinates(yOrigSet, zOrigSet, particle_idx, -2, -2);
+        plotCrackCoordinates(yNewSet, zNewSet, particle_idx, -3, -3);
+        error('[边界检查] 粒子%d检测到裂纹坐标超出物理边界（非极端扩展）！', particle_idx);
     end
-    % 绘制最原始输入的图形
-    plotCrackCoordinates(yInputSet, zInputSet, particle_idx, -1, -1);  % 包含粒子编号
-    % 绘制处理前的原始图形
-    plotCrackCoordinates(yOrigSet, zOrigSet, particle_idx, -2, -2);  % 包含粒子编号
-    % 绘制约束处理后的图形
-    plotCrackCoordinates(yNewSet, zNewSet, particle_idx, -3, -3);   % 包含粒子编号
-    error('[边界检查] 粒子%d检测到裂纹坐标超出物理边界！程序终止以确保计算质量。', particle_idx);
 end
 
 %% 几何正则化

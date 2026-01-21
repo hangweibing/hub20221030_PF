@@ -35,7 +35,7 @@ DEBUG_MODE = false;                    % 设置为 true 开启debug模式，fals
 
 % 基本粒子滤波参数
 n = 1;                                    % 状态向量的维度（每个粒子）
-N = 2000;                                  % 粒子数量
+N = 10000;                                  % 粒子数量
 v_sphere = 2;                             % 一维空间维度参数
 
 % 正则化粒子滤波参数计算
@@ -92,7 +92,7 @@ if ~DEBUG_MODE
         1,2,4;  % 参数1,2,4
         1,3,4;  % 参数1,3,4
         2,3,4   % 参数2,3,4
-    ];
+        ];
 
     for k = 1:4
         i = param_triplets(k,1);
@@ -103,12 +103,12 @@ if ~DEBUG_MODE
 
         % 绘制训练数据的三维散点图
         scatter3(X_train(:,i), X_train(:,j), X_train(:,l), 20, 'filled', ...
-                'MarkerFaceColor', 'r', 'MarkerFaceAlpha', 0.4, 'MarkerEdgeColor', 'none');
+            'MarkerFaceColor', 'r', 'MarkerFaceAlpha', 0.4, 'MarkerEdgeColor', 'none');
         hold on;
 
         % 绘制Copula采样数据的三维散点图
         scatter3(particle_params(:,i), particle_params(:,j), particle_params(:,l), 15, 'filled', ...
-                'MarkerFaceColor', 'b', 'MarkerFaceAlpha', 0.3, 'MarkerEdgeColor', 'none');
+            'MarkerFaceColor', 'b', 'MarkerFaceAlpha', 0.3, 'MarkerEdgeColor', 'none');
 
         % 清理变量名用于显示（移除下划线等特殊字符）
         clean_name_i = strrep(param_names{i}, '_', '-');
@@ -120,7 +120,7 @@ if ~DEBUG_MODE
         zlabel(clean_name_l, 'Interpreter', 'none', 'FontSize', 9, 'FontName', 'Arial');
 
         title(sprintf('%s vs %s vs %s', clean_name_i, clean_name_j, clean_name_l), ...
-              'Interpreter', 'none', 'FontSize', 10, 'FontName', 'Arial');
+            'Interpreter', 'none', 'FontSize', 10, 'FontName', 'Arial');
 
         legend('Training Data', 'Sampled', 'Location', 'best', 'FontSize', 8, 'FontName', 'Arial');
 
@@ -168,8 +168,12 @@ std_Kc = 3.34 ;                           % 断裂韧性标准差 (MPa√m)
 % t_check=[5.8741E+01 9.9534E+01 1.3869E+02 171.873 1.8275E+02 203.419 2.1810E+02 2.4204E+02 2.8120E+02 3.1546E+02 3.4375E+02 3.8182E+02];
 % z      =[2.4882E+00 2.9894E+00 4.0190E+00 5.46751 7.2212E+00 10.4231 1.3130E+01 1.6057E+01 2.0226E+01 2.1715E+01 2.2903E+01 2.3452E+01]+30;
 
-% 实际使用的观测数据（简化版）
-t_check = [9.9534E+01 1.3869E+02  1.8275E+02 2.4204E+02 2.8120E+02];
+% 实际使用的观测数据（铝合金）
+% t_check = [9.9534E+01 1.3869E+02  1.8275E+02 2.4204E+02 2.8120E+02];
+% z       = [2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
+
+% 实际使用的观测数据（钛合金）
+t_check = [1.6869E+02 2.1275E+02  2.7204E+02 3.1120E+02 3.4546E+02];
 z       = [2.9894E+00 4.0190E+00  7.2212E+00 1.6057E+01 2.0226E+01] + 30;
 
 % 观测相关参数
@@ -327,9 +331,9 @@ stage = [1, 2, 3, 4, 5, 6, 7, 0, 0, 0, 0, 8];
 
 % 各阶段模型的测试误差集合（10个误差值）
 testErrSet = [0.019803420755871 0.058377623733943 0.013343080193008 ...
-              0.009221345729625 0.037283991994545 0.011408674471790 ...
-              0.082711915490345 0.032375406062069 0.041104885753232 ...
-              0.057544490601307];
+    0.009221345729625 0.037283991994545 0.011408674471790 ...
+    0.082711915490345 0.032375406062069 0.041104885753232 ...
+    0.057544490601307];
 
 %% ===================================================================
 %% Debug模式配置（裂纹可视化）
@@ -389,97 +393,88 @@ while (m-1)*step/1950.70866 <= t_check(end)
 
     % 初始化当前时间步的K值存储
     particles_deltaK_max_temp = zeros(N, 1);
-    
-    for (i = 1:N)
-        %% 粒子级变量初始化
-        curUinput = {};
-        curAverInput = {};
-        SPLITTED = SPLITTE_temp(i);  % 获取上一时刻的分裂状态
-        
-        %% 为每个并行线程设置独立的随机数流（parfor线程安全）
-        % 原方案: 直接使用全局randi()，导致线程间竞态条件和不可重现结果
-        % 问题: parfor中所有线程共享全局随机数生成器状态
-        % 解决: 为每个线程创建独立随机流，避免线程间干扰
-        % 使用全局种子、粒子索引和时间步作为复合种子，确保完全可重现性
-        stream = RandStream('mt19937ar', 'Seed', SIM_SEED + i + m*N);
 
-        %% 粒子状态提取
-        xparticlei = xparticlem_1(i, :);  % 当前粒子的完整状态向量
+    parfor (i = 1:N)
+        try
+            %% 粒子级变量初始化
+            curUinput = {};
+            curAverInput = {};
+            SPLITTED = SPLITTE_temp(i);  % 获取上一时刻的分裂状态
 
-        %% 裂纹尺寸计算（用于阶段判断）
-        a_up = xparticlei(42) - 30;     % 上表面裂纹长度（z坐标）
-        a_down = xparticlei(22) - 30;   % 下表面裂纹长度（z坐标）
+            %% 为每个并行线程设置独立的随机数流（parfor线程安全）
+            stream = RandStream('mt19937ar', 'Seed', SIM_SEED + i + m*N);
 
-        %% 裂纹发展阶段判断
-        % 220914: 从离散采样改为连续采样策略
-        m_index = 0;
+            %% 粒子状态提取
+            xparticlei = xparticlem_1(i, :);  % 当前粒子的完整状态向量
 
-        while m_index == 0
-            m_index = getModelIndexFunc(a_up, a_down); % 判断裂纹发展阶段
+            % 如果上一时刻已经是NaN，则直接跳过
+            if any(isnan(xparticlei))
+                error('A2A:InvalidParticle', 'Inherited NaN');
+            end
 
-            if m_index == 0
-                % 阶段判断失败：使用线程本地随机数重采样
-                tmp_sel = randi(stream, [1, N], 1, 1);
-                xparticlei = xparticlem_1(tmp_sel, :);
-                a_up = xparticlei(42) - 30;
-                a_down = xparticlei(22) - 30;
+            %% 裂纹尺寸计算（用于阶段判断）
+            a_up = xparticlei(42) - 30;     % 上表面裂纹长度（z坐标）
+            a_down = xparticlei(22) - 30;   % 下表面裂纹长度（z坐标）
+
+            %% 裂纹发展阶段判断
+            m_index = 0;
+            while m_index == 0
+                m_index = getModelIndexFunc(a_up, a_down);
+
+                if m_index == 0
+                    tmp_sel = randi(stream, [1, N], 1, 1);
+                    xparticlei = xparticlem_1(tmp_sel, :);
+                    if any(isnan(xparticlei)), error('A2A:InvalidParticle', 'Selected NaN'); end
+                    a_up = xparticlei(42) - 30;
+                    a_down = xparticlei(22) - 30;
+                end
+            end
+
+            %% 模型选择
+            if SPLITTED && (m_index==3 || m_index==5)
+                if m_index==3
+                    curUinput = Uinput_splitted_1;
+                    curAverInput = averInput_splitted_1;
+                elseif m_index==5
+                    curUinput = Uinput_splitted_2;
+                    curAverInput = averInput_splitted_2;
+                end
+                m_name = sprintf('nn_stage%ds', stage(m_index));
+            else
+                curUinput = Uinput_integrated{stage(m_index)};
+                curAverInput = averInput_integrated{stage(m_index)};
+                m_name = sprintf('nn_stage%d', stage(m_index));
+            end
+
+            %% 粒子状态分量提取
+            yRegSet = xparticlei(1:21);
+            zRegSet = xparticlei(22:42);
+            particles_coordinates{i} = [particles_coordinates{i}; [yRegSet, zRegSet]];
+
+            log_theta1_ = xparticlei(43);
+            theta2 = xparticlei(44);
+            theta3 = xparticlei(45);
+            k2 = xparticlei(46);
+
+            %% 调用预测模型更新粒子状态
+            [yRegSet, zRegSet, SPLITTED, log_theta1_, theta2, theta3, k2, deltaKSet] = ...
+                a2aNew(yRegSet, zRegSet, aver_delta_sigma, aver_R_set(m-1), aver_Smax_set(m-1), m_name, ...
+                curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, i);
+
+            particles_deltaK_max_temp(i) = deltaKSet(end);
+            xparticle(i, :, m) = real([yRegSet, zRegSet, log_theta1_, theta2, theta3, k2]);
+            SPLITTE_temp(i) = SPLITTED;
+
+        catch ME
+            if strcmp(ME.identifier, 'A2A:InvalidParticle')
+                % 捕获到无效粒子，标记为 NaN 并不参与后续统计
+                xparticle(i, :, m) = NaN;
+                particles_deltaK_max_temp(i) = NaN;
+                SPLITTE_temp(i) = 0;
+            else
+                rethrow(ME);
             end
         end
-
-        %% ===================================================================
-        %% 模型选择
-        %% ===================================================================
-
-        if SPLITTED && (m_index==3 || m_index==5)
-            %% 分裂模型分支（几何复杂情况）
-            if m_index==3
-                curUinput = Uinput_splitted_1;      % 第3阶段分裂POD基
-                curAverInput = averInput_splitted_1; % 第3阶段分裂平均形状
-            elseif m_index==5
-                curUinput = Uinput_splitted_2;      % 第5阶段分裂POD基
-                curAverInput = averInput_splitted_2; % 第5阶段分裂平均形状
-            end
-            m_name = sprintf('nn_stage%ds', stage(m_index));  % 分裂模型文件名
-        else
-            %% 整体模型分支（标准情况）
-            curUinput = Uinput_integrated{stage(m_index)};       % 标准POD基
-            curAverInput = averInput_integrated{stage(m_index)};  % 标准平均形状
-            m_name = sprintf('nn_stage%d', stage(m_index));       % 整体模型文件名
-        end
-
-        %% ===================================================================
-        %% 粒子状态分量提取
-        %% ===================================================================
-
-        % 几何坐标分量
-        yRegSet = xparticlei(1:21);     % y坐标集（21个节点）
-        zRegSet = xparticlei(22:42);    % z坐标集（21个节点）
-
-        % 保存当前粒子的坐标信息（第m次更新前的[y,z]坐标）
-        particles_coordinates{i} = [particles_coordinates{i}; [yRegSet, zRegSet]];
-
-        log_theta1_ = xparticlei(43);    % 模型参数log_theta1_
-        theta2 = xparticlei(44);         % 模型参数theta2
-        theta3 = xparticlei(45);         % 模型参数theta3
-        k2 = xparticlei(46);             % 模型参数k2
-
-        % 可选：绘制裂纹几何形状
-        % figure; plot_geometry_20; plot(zRegSet, yRegSet); axis equal;
-
-        %% 调用预测模型更新粒子状态
-        [yRegSet, zRegSet, SPLITTED, log_theta1_, theta2, theta3, k2, deltaKSet] = ...
-            a2aNew(yRegSet, zRegSet, aver_delta_sigma, aver_R_set(m-1), aver_Smax_set(m-1), m_name, ...
-                   curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, i);
-
-        %% 存储当前粒子的100%分位数应力强度因子
-        particles_deltaK_max_temp(i) = deltaKSet(end);
-
-        %% 更新粒子状态（parfor兼容：直接确保实数）
-        % 原方案: xparticle(i, :, m) = [...]; xparticle = real(xparticle);
-        % 问题: 第二行违反parfor切片规则，读取整个数组导致竞态条件
-        % 解决: 在赋值时直接取实部，避免全局数组操作
-        xparticle(i, :, m) = real([yRegSet, zRegSet, log_theta1_, theta2, theta3, k2]);
-        SPLITTE_temp(i) = SPLITTED;      % 更新分裂状态
     end
 
     % Debug模式：统一保存所有粒子的坐标信息
@@ -487,23 +482,33 @@ while (m-1)*step/1950.70866 <= t_check(end)
         save('debug_particles_coordinates.mat', 'particles_coordinates', 'm');
     end
 
-    % 计算粒子滤波统计量
-    weight(:, m) = 1/N * ones(N, 1);             % 均匀权重初始化
-    Xpf(:, m) = (mean(xparticle(:, :, m)))';     % 状态均值估计
-    xparticle_cov(:, :, m) = cov(xparticle(:, :, m)); % 状态协方差
-    
+    % 计算粒子滤波统计量 (排除 NaN 无效粒子)
+    valid_mask = ~isnan(xparticle(:, 1, m));
+    weight(:, m) = 1/N * ones(N, 1);
+    if any(valid_mask)
+        Xpf(:, m) = (mean(xparticle(valid_mask, :, m)))';
+        xparticle_cov(:, :, m) = cov(xparticle(valid_mask, :, m));
+    else
+        Xpf(:, m) = Xpf(:, m-1); % 如果全部失效，保持不变
+    end
+
     %% ===================================================================
     %% 计算POF（！！！！！注意K的单位换算！！！！！）
     %% ===================================================================
+
     try
         % deltaK_max 计算出 K_max
-        particles_K_max = particles_deltaK_max_temp / (1 - aver_R_set(m-1));
-        POF_array(m) = calculatePOF(particles_K_max / sqrt(1000), mu_Kc, std_Kc);
+        valid_K = particles_deltaK_max_temp(~isnan(particles_deltaK_max_temp));
+        if ~isempty(valid_K)
+            particles_K_max_valid = valid_K / (1 - aver_R_set(m-1));
+            POF_array(m) = calculatePOF(particles_K_max_valid / sqrt(1000), mu_Kc, std_Kc);
+        else
+            POF_array(m) = POF_array(m-1);
+        end
     catch ME
         warning('POF计算失败 (时间步 %d): %s', m, ME.message);
         POF_array(m) = 0;  % 失败时设为0
     end
-
 
     %% 提取关键参数的历史记录
     upcrackparticles(:, m) = xparticle(:, 42, m);      % 上表面裂纹长度
@@ -518,10 +523,14 @@ while (m-1)*step/1950.70866 <= t_check(end)
     if ((m-1)*step/1950.70866 < t_check(j)) && (m*step/1950.70866 >= t_check(j))
         %% 计算似然权重
         for i = 1:N   % 观测更新
-            zPred(i) = upcrackparticles(i, m);        % 预测观测值
+            zPred(i) = upcrackparticles(i, m);
+            if isnan(zPred(i))
+                weight(i, m) = 1e-99; % 对无效粒子赋予极小权重
+                continue;
+            end
             z1(i) = z(j) - zPred(i);                  % 观测残差
             weight(i, m) = inv(sqrt(2*pi*det(R))) * ...
-                          exp(-0.5*(z1(i))*inv(R)*(z1(i))') + 1e-99;
+                exp(-0.5*(z1(i))*inv(R)*(z1(i))') + 1e-99;
         end
 
         %% 归一化权重
@@ -551,7 +560,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
         xparticle(:, :, m) = xparticle(outindex, :, m);
 
         % 重采样后清空粒子坐标历史，重新开始记录
-        particles_coordinates = cell(1, N); 
+        particles_coordinates = cell(1, N);
 
         j = j + 1;  % 观测计数器递增
     end
@@ -561,13 +570,13 @@ while (m-1)*step/1950.70866 <= t_check(end)
     %% ===================================================================
     if DEBUG_MODE
         debug_plot_counter = debug_plot_counter + 1;
-        
+
         % 每隔指定次数循环，绘制指定粒子的裂纹图像
         if debug_plot_counter >= DEBUG_PLOT_INTERVAL
             % 获取指定粒子的当前裂纹坐标
             yDebugSet = xparticle(DEBUG_PARTICLE_IDX, 1:21, m);
             zDebugSet = xparticle(DEBUG_PARTICLE_IDX, 22:42, m);
-            
+
             % 计算当前飞行小时数
             current_flight_hours = (m-1)*step/1950.70866;
 
@@ -576,21 +585,21 @@ while (m-1)*step/1950.70866 <= t_check(end)
             fprintf('  [Debug] 已绘制粒子 %d 在时间步 %d (%.2f小时) 的裂纹图像\n', ...
                 DEBUG_PARTICLE_IDX, m, current_flight_hours);
 
-            
+
             % 重置计数器
             debug_plot_counter = 0;
         end
     end
 
     m = m + 1;  % 时间步递增
-    
+
     % 计算耗时
     iter_time = toc(iter_tic);
     total_time = toc(total_tic);
-    
+
     disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测', ...
-          '，当前步耗时：' num2str(iter_time, '%.2f') 's', ...
-          '，累计总耗时：' num2str(total_time, '%.2f') 's']);
+        '，当前步耗时：' num2str(iter_time, '%.2f') 's', ...
+        '，累计总耗时：' num2str(total_time, '%.2f') 's']);
 end
 
 %% ===================================================================
@@ -602,10 +611,16 @@ clear x y_0 y_1 y_2 y_3 y_33 y21 PoF3
 
 % 计算统计量
 for i = 1:m-1
-    y_1(i) = prctile(upcrackparticles(:, i), 99.95) - 30;  % 99.95%分位数
-    y_2(i) = prctile(upcrackparticles(:, i), 0.05) - 30;   % 0.05%分位数
-    y_3(i) = Xpf(42, i) - 30;                              % 均值估计
-    x(i) = (i-1) * step / 1950.70866;                      % 时间轴
+    valid_up = upcrackparticles(:, i);
+    valid_up = valid_up(~isnan(valid_up));
+    if ~isempty(valid_up)
+        y_1(i) = prctile(valid_up, 99.95) - 30;
+        y_2(i) = prctile(valid_up, 0.05) - 30;
+        y_3(i) = mean(valid_up) - 30;
+    else
+        y_1(i) = NaN; y_2(i) = NaN; y_3(i) = NaN;
+    end
+    x(i) = (i-1) * step / 1950.70866;
 end
 
 % %% 观测数据
