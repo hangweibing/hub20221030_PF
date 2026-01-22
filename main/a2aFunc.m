@@ -6,14 +6,6 @@ function [yRegSet, zRegSet, SPLITTED, log_theta1_, theta2, theta3, k2, deltaKSet
     a2aFunc(yRegSet, zRegSet, aver_delta_sigma, aver_R, aver_Smax, m_name, curUinput, curAverInput, log_theta1_, theta2, theta3, k2, step, testErrSet, particle_idx)
 
 %A2AFUNC 基于当前时刻的裂纹状态和对应模型预测下一时刻的裂纹状态
-
-% 性能分析：预分配各部分耗时记录
-time_pod = 0;        % POD降维投影耗时
-time_nn = 0;         % 神经网络预测耗时
-time_small_crack = 0;% 小裂纹处理耗时
-time_geometry = 0;   % 几何形状更新耗时
-time_constraint = 0; % 几何约束处理耗时
-time_regular = 0;    % 几何正则化耗时
 %
 % 算法原理：
 %   采用POD（Proper Orthogonal Decomposition）降维和神经网络相结合的方法
@@ -65,15 +57,12 @@ zInputSet = zRegSet;
 
 %% POD降维投影
 % 将裂纹几何形状投影到POD基空间进行降维
-t_pod = tic;
 inputRegSet = [yRegSet, zRegSet]';  % 组合y和z坐标为输入矩阵
 input = curUinput' * (inputRegSet - curAverInput);  % POD投影，每一列表示一个坐标
-time_pod = toc(t_pod);
 
 %% ===================================================================
 %% 神经网络预测K（！！！！！注意单位！！！！！）
 %% ===================================================================
-t_nn = tic;
 % 使用神经网络计算 deltaK Kmax
 [deltaKSet] = sim_K_func(m_name, input, aver_delta_sigma * 0.367, testErrSet);
 deltaKSet_vec = deltaKSet';
@@ -82,7 +71,6 @@ deltaKSet_m = deltaKSet_vec / sqrt(1000);
 [Kmax] = sim_K_func(m_name, input, aver_Smax * 0.367, testErrSet);
 Kmax = Kmax / sqrt(1000);
 Kmax = Kmax';  % 转换为行向量，与deltaKSet_m保持一致的维度
-time_nn = toc(t_nn);
 
 % deltaKSet_vec = deltaKSet';  % 转换为行向量
 % deltaKSet_m = deltaKSet_vec / sqrt(1000);  % 从mm单位转换为m单位
@@ -112,7 +100,7 @@ da = 1e3 * da; % 单位转换
 %% 特殊情况处理：小裂纹的各向同性扩展
 %% ===================================================================
 
-t_small_crack = tic;
+% t_small_crack = tic;  % 性能统计已注释
 %% 判断是否为小裂纹阶段
 a_up = a_old(end);  % 上表面裂纹尺寸
 
@@ -143,27 +131,27 @@ if(a_up <= 1.5)
     da_new = sqrt(da_y_new.^2 + da_z_new.^2);
     da = da_new;  % 更新扩展量
 end
-time_small_crack = toc(t_small_crack);
+% t_small_crack_time = toc(t_small_crack);  % 性能统计已注释
 
 %% ===================================================================
 %% 几何形状更新
 %% ===================================================================
 
-t_geometry = tic;
-
 %% 计算法向量（确定扩展方向）
+% t_normal = tic;  % 性能统计已注释
 normalNormalizeVectorSet = CalNormalVector(yRegSet, zRegSet, ksiRegSet);
 % 计算每个节点的法向量，用于确定裂纹扩展的方向
+% t_normal_time = toc(t_normal);  % 性能统计已注释
 
 %% 计算坐标增量
+% t_coord_update = tic;  % 性能统计已注释
 yIncrSet = da .* normalNormalizeVectorSet(1, :);  % y方向增量
 zIncrSet = da .* normalNormalizeVectorSet(2, :);  % z方向增量
 
 %% 更新裂纹几何形状
 yNewSet = yRegSet + yIncrSet;  % 新的y坐标集
 zNewSet = zRegSet + zIncrSet;  % 新的z坐标集
-
-time_geometry = toc(t_geometry);
+% t_coord_update_time = toc(t_coord_update);  % 性能统计已注释
 
 
 %% ===================================================================
@@ -171,13 +159,12 @@ time_geometry = toc(t_geometry);
 %% ===================================================================
 
 %% 边界约束处理
-t_constraint = tic;
+% t_constraint = tic;  % 性能统计已注释
 % 保存约束处理前的原始坐标，用于对比分析
 yOrigSet = yNewSet;
 zOrigSet = zNewSet;
 % 根据边界条件调整裂纹形状，同时检测是否发生分裂
 [yNewSet, zNewSet, SPLITTED] = addConstraintNewSatgeFunc(yNewSet, zNewSet);
-time_constraint = toc(t_constraint);
 
 %% ===================================================================
 %% 异常状态检查（鲁棒性增强）
@@ -233,23 +220,9 @@ if hasViolation
 end
 
 %% 几何正则化
-t_regular = tic;
+% t_regular = tic;  % 性能统计已注释
 % 重新生成规则的裂纹轮廓，确保几何约束满足且没有自相交
 [yRegSet, zRegSet, ~, SPLITTED] = crackRegular5Func(yNewSet, zNewSet, nRegPoint, 'false');
-time_regular = toc(t_regular);
-
-%% 性能统计显示（仅在第一个粒子显示，避免输出过多）
-if particle_idx == 1
-    fprintf('  [性能统计] a2aFunc各部分耗时:\n');
-    fprintf('    POD降维：%.4e s\n', time_pod);
-    fprintf('    神经网络：%.4e s\n', time_nn);
-    fprintf('    小裂纹处理：%.4e s\n', time_small_crack);
-    fprintf('    几何更新：%.4e s\n', time_geometry);
-    fprintf('    约束处理：%.4e s\n', time_constraint);
-    fprintf('    几何正则：%.4e s\n', time_regular);
-    total_a2a_time = time_pod + time_nn + time_small_crack + time_geometry + time_constraint + time_regular;
-    fprintf('    a2aFunc总耗时：%.4e s\n', total_a2a_time);
-end
 
 
 

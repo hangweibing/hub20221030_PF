@@ -43,6 +43,7 @@ A = (8/v_sphere*(n+4)*(2*sqrt(pi))^n)^(1/(n+4));
 h = A*N^(-1/(n+4));                       % 正则化粒子滤波的平滑参数
 
 % 预采样所有粒子的参数组合（提高效率）
+SAVE_INTERVAL = 10;                       % 数据保存间隔：每隔 k 次循环保存一次数据到磁盘
 if ~DEBUG_MODE
     fprintf('预采样 %d 个粒子的参数组合...\n', N);
     particle_params = kde_sampling('batch_sample', N);
@@ -143,8 +144,8 @@ cyclesperhour = 1950.70866;              % 每小时循环次数
 mu_Kc = 33.4 ;                           % 断裂韧性均值 (MPa√m)
 std_Kc = 3.34 ;                          % 断裂韧性标准差 (MPa√m)
 
-% 使用 matfile 进行增量存储（类似于数据库，数据存储在磁盘上）
-% 避免内存占用过高（原本 10000x46x1000 的矩阵占用 GB 级内存）
+% 使用 matfile 进行批量存储（先在内存中累积，再批量写入磁盘）
+% 避免频繁 I/O 操作，提升性能
 history_file = 'pf_simulation_results.mat';
 if exist(history_file, 'file'), delete(history_file); end
 mfile = matfile(history_file, 'Writable', true);
@@ -157,6 +158,16 @@ mfile.theta2_particles = zeros(N, 1000);
 mfile.theta3_particles = zeros(N, 1000);
 mfile.k2_particles = zeros(N, 1000);
 mfile.weight = zeros(N, 1000);
+
+% 内存缓冲区：用于累积 SAVE_INTERVAL 步的数据，减少 I/O 频率
+buffer_xparticle = zeros(N, 46, SAVE_INTERVAL);
+buffer_upcrackparticles = zeros(N, SAVE_INTERVAL);
+buffer_log_theta1_particles = zeros(N, SAVE_INTERVAL);
+buffer_theta2_particles = zeros(N, SAVE_INTERVAL);
+buffer_theta3_particles = zeros(N, SAVE_INTERVAL);
+buffer_k2_particles = zeros(N, SAVE_INTERVAL);
+buffer_weight = zeros(N, SAVE_INTERVAL);
+buffer_step_counter = 0;  % 缓冲区当前累积的步数
 
 % 统计量和观测矩阵（规模较小，可保留在内存中）
 Xpf = zeros(46, 1000);                   % 滤波估计值均值
@@ -245,23 +256,22 @@ for i = 1:N   % 遍历所有粒子
     xparticle_curr(i, :) = [yIniRegSet, zIniRegSet, log_theta1_, theta2, theta3, k2];
 end
 
-% 将初始时刻数据保存到磁盘
-mfile.xparticle(:, :, 1) = xparticle_curr;
+% 将初始时刻数据保存到缓冲区（第1步）
+buffer_step_counter = 1;
+buffer_xparticle(:, :, 1) = xparticle_curr;
+buffer_upcrackparticles(:, 1) = xparticle_curr(:, 42);
+buffer_log_theta1_particles(:, 1) = xparticle_curr(:, 43);
+buffer_theta2_particles(:, 1) = xparticle_curr(:, 44);
+buffer_theta3_particles(:, 1) = xparticle_curr(:, 45);
+buffer_k2_particles(:, 1) = xparticle_curr(:, 46);
+buffer_weight(:, 1) = current_weight;
 
 %% ===================================================================
 %% 初始时刻统计量计算
 %% ===================================================================
 
-% 提取各参数的粒子分布并保存到磁盘
-mfile.upcrackparticles(:, 1) = xparticle_curr(:, 42);      % 上表面裂纹长度
-mfile.log_theta1_particles(:, 1) = xparticle_curr(:, 43);  % log_theta1_参数（NASGRO模型）
-mfile.theta2_particles(:, 1) = xparticle_curr(:, 44);      % theta2参数（NASGRO模型）
-mfile.theta3_particles(:, 1) = xparticle_curr(:, 45);      % theta3参数（NASGRO模型）
-mfile.k2_particles(:, 1) = xparticle_curr(:, 46);          % k2参数（NASGRO模型）
-
-% 初始化粒子权重并录入磁盘
+% 初始化粒子权重
 current_weight = 1/N * ones(N, 1);
-mfile.weight(:, 1) = current_weight;
 
 % 初始化粒子坐标信息存储（cell数组，1×N，每列保存一个粒子的坐标历史）
 particles_coordinates = cell(1, N);
@@ -462,8 +472,10 @@ while (m-1)*step/1950.70866 <= t_check(end)
             %% 粒子状态分量提取
             yRegSet = xparticlei(1:21);
             zRegSet = xparticlei(22:42);
-            % 记录坐标历史
-            particles_coordinates{i} = [particles_coordinates{i}; [yRegSet, zRegSet]];
+            % 记录坐标历史 (仅在 Debug 模式开启时记录，避免非必要的内存消耗)
+            if DEBUG_MODE
+                particles_coordinates{i} = [particles_coordinates{i}; [yRegSet, zRegSet]];
+            end
 
             log_theta1_ = xparticlei(43);
             theta2 = xparticlei(44);
@@ -489,11 +501,6 @@ while (m-1)*step/1950.70866 <= t_check(end)
     % 更新缓冲区
     xparticle_curr = x_next_temp;
     SPLITTE_temp = splitted_update;
-
-    % Debug模式：统一保存所有粒子的坐标信息
-    if DEBUG_MODE
-        save('debug_particles_coordinates.mat', 'particles_coordinates', 'm');
-    end
 
     % 计算粒子滤波统计量 (排除 NaN 无效粒子)
     valid_mask = ~isnan(xparticle_curr(:, 1));
@@ -558,29 +565,44 @@ while (m-1)*step/1950.70866 <= t_check(end)
     end
 
     %% ===================================================================
-    %% Debug模式：裂纹可视化绘图
+    %% 数据累积与批量保存（减少 I/O 消耗）
     %% ===================================================================
-    if DEBUG_MODE
-        debug_plot_counter = debug_plot_counter + 1;
 
-        % 每隔指定次数循环，绘制指定粒子的裂纹图像
-        if debug_plot_counter >= DEBUG_PLOT_INTERVAL
-            % 获取指定粒子的当前裂纹坐标
-            yDebugSet = xparticle(DEBUG_PARTICLE_IDX, 1:21, m);
-            zDebugSet = xparticle(DEBUG_PARTICLE_IDX, 22:42, m);
+    % 每次循环都将数据累积到内存缓冲区
+    buffer_step_counter = buffer_step_counter + 1;
+    buffer_xparticle(:, :, buffer_step_counter) = xparticle_curr;
+    buffer_upcrackparticles(:, buffer_step_counter) = xparticle_curr(:, 42);
+    buffer_log_theta1_particles(:, buffer_step_counter) = xparticle_curr(:, 43);
+    buffer_theta2_particles(:, buffer_step_counter) = xparticle_curr(:, 44);
+    buffer_theta3_particles(:, buffer_step_counter) = xparticle_curr(:, 45);
+    buffer_k2_particles(:, buffer_step_counter) = xparticle_curr(:, 46);
+    buffer_weight(:, buffer_step_counter) = current_weight;
 
-            % 计算当前飞行小时数
-            current_flight_hours = (m-1)*step/1950.70866;
+    % 每隔 SAVE_INTERVAL 步批量保存一次数据，或者在最后一步强制保存
+    if buffer_step_counter >= SAVE_INTERVAL || (m*step/1950.70866 > t_check(end))
+        % 计算本次要保存的时间步范围
+        start_step = m - buffer_step_counter + 1;
+        end_step = m;
 
-            % 调用绘图函数
-            plotCrackCoordinates(yDebugSet, zDebugSet, DEBUG_PARTICLE_IDX, m, current_flight_hours);
-            fprintf('  [Debug] 已绘制粒子 %d 在时间步 %d (%.2f小时) 的裂纹图像\n', ...
-                DEBUG_PARTICLE_IDX, m, current_flight_hours);
+        % 批量保存粒子状态到磁盘 (matfile)
+        mfile.xparticle(:, :, start_step:end_step) = buffer_xparticle(:, :, 1:buffer_step_counter);
+        mfile.upcrackparticles(:, start_step:end_step) = buffer_upcrackparticles(:, 1:buffer_step_counter);
+        mfile.log_theta1_particles(:, start_step:end_step) = buffer_log_theta1_particles(:, 1:buffer_step_counter);
+        mfile.theta2_particles(:, start_step:end_step) = buffer_theta2_particles(:, 1:buffer_step_counter);
+        mfile.theta3_particles(:, start_step:end_step) = buffer_theta3_particles(:, 1:buffer_step_counter);
+        mfile.k2_particles(:, start_step:end_step) = buffer_k2_particles(:, 1:buffer_step_counter);
+        mfile.weight(:, start_step:end_step) = buffer_weight(:, 1:buffer_step_counter);
 
-
-            % 重置计数器
-            debug_plot_counter = 0;
+        % 如果开启了 Debug 模式，保存坐标历史到 mat 文件
+        if DEBUG_MODE
+            save('debug_particles_coordinates.mat', 'particles_coordinates', 'm');
         end
+
+        fprintf('  [数据保存] 已批量保存时间步 %d-%d 的粒子数据到磁盘 (%d 步)\n', ...
+                start_step, end_step, buffer_step_counter);
+
+        % 重置缓冲区计数器
+        buffer_step_counter = 0;
     end
 
     m = m + 1;  % 时间步递增
@@ -589,7 +611,9 @@ while (m-1)*step/1950.70866 <= t_check(end)
     iter_time = toc(iter_tic);
     total_time = toc(total_tic);
 
-    disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测，当前步耗时：' num2str(iter_time, '%.2f') 's，累计总耗时：' num2str(total_time, '%.2f') 's']);
+    disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测', ...
+        '，当前步耗时：' num2str(iter_time, '%.2f') 's', ...
+        '，累计总耗时：' num2str(total_time, '%.2f') 's']);
 end
 
 %% ===================================================================
