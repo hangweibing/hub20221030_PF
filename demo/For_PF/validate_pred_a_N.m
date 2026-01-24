@@ -1,0 +1,64 @@
+%% 验证 pred_a_N 函数的测试脚本
+clear; clc;
+
+f1 = -12.0722;
+f2 = 3.1441;
+f3 = 0.5181;
+k1 = 1.2903;
+k2 = 13.4907;
+
+% true_params = [f1, f2, f3, k1, k2];
+% 1. 输入从 gen_synthetic_data_spectrum.m 得到的数据
+t_check = [202.5475  405.0949  607.6424  810.1899 1012.7374 1215.2848 1417.8323 1620.3798 1822.9273];
+z = [10.5573 11.1964 11.9421 12.8326 13.9283 15.3444 17.3190 20.5362 30.0371];
+% true_params = [-12.5479, 3.9835, 0.3326, 6.6750]; % [log_theta1, theta2, theta3, k2]
+log_theta1 = f1 - f3 * log10(k1)
+theta2 = f2 + f3
+theta3 = f3
+true_params = [log_theta1, theta2, theta3, k2];
+
+% 2. 构造参数结构体 p
+p.theta = true_params;
+p.f = 100;                  % 应力-力转换系数 (stress_to_force)
+p.k = k2;      % k2
+p.W = 60;                  % 试样宽度
+p.B = 5;                   % 试样厚度
+p.cyclesperhour = 1950.70866;
+
+% 定义 da/dN 模型的占位符函数
+% 注意：pred_a_N 传入的 delta_K 和 Kmax 已经是力对应的 K 了
+% p.eq_fun = @(dk_m, theta_vec, f_factor, k_val, kmax_m) ...
+%     (theta_vec(1) - theta_vec(3).*log10(theta_vec(4)) + (theta_vec(2) + theta_vec(3)).*log10(dk_m) + theta_vec(3).*(kmax_m./theta_vec(5) - 1));
+p.eq_fun = @(dk_m, theta_vec, f_factor, k_val, kmax_m) ...
+    (10^theta_vec(1)) * (dk_m.^theta_vec(2)) .* (max(kmax_m./theta_vec(4) - 1, 0).^theta_vec(3));
+% 3. 调用 fit_a_N 进行预测
+% 注意：我们需要调整 fit_a_N 内部的应力转换逻辑，或者在 fit_a_N 中加入 p.f 的使用
+% 观察 fit_a_N.m 第 83-84 行：
+% delta_K = (Smax - Smin) / ref_load * K_base;
+% Kmax = Smax / ref_load * K_base;
+% 这里 Smax 是应力，而 K_base 是基于 ref_load (力) 的。
+% 所以计算出的 delta_K 物理单位不匹配。
+% 我们需要修改 fit_a_N.m，使 Smax 乘以 p.f 转换为力。
+
+fprintf('--- 开始验证 pred_a_N ---\n');
+
+% 执行预测
+tic;
+[mse, a_pred] = pred_a_N(p, t_check, z);
+toc;
+% 4. 可视化对比结果
+figure('Color', 'w');
+plot(t_check, z, 'ro', 'MarkerSize', 8, 'DisplayName', 'True Inspection (Noise Added)');
+hold on;
+plot(t_check, a_pred, 'b-o', 'LineWidth', 1.5, 'DisplayName', 'Predicted Trajectory');
+xlabel('Time (Flight hours)');
+ylabel('Crack Length (mm)');
+title(['Validation of pred\_a\_N (MSE: ', num2str(mse, '%.4f'), ')']);
+legend('Location', 'best');
+grid on;
+
+fprintf('预测均方误差 MSE: %.6f\n', mse);
+fprintf('预测值 a_pred:\n');
+disp(a_pred);
+fprintf('真实值 z:\n');
+disp(z);

@@ -17,9 +17,9 @@ if nargin >= 2
     end
 else
     % 使用全局随机数（保留向后兼容性）
+    outindex = zeros(1, N);
     parfor i = 1:N
         outindex(i) = find(rand <= cumsum(w), 1);
     end
 end
 end
-
