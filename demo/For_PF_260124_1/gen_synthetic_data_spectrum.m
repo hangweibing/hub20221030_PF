@@ -8,8 +8,8 @@ clear; close all; clc;
 
 % 设置输入参数
 a0 = 10;                           % 初始裂纹长度 (mm)
-noise_std = 0.5;                   % 观测噪声标准差 (mm)
-stress_to_force = 50;              % 手动设置系数：将应力转化为力 (N/MPa)
+noise_std = 0.0;                   % 观测噪声标准差 (mm)
+stress_to_force = 100;              % 手动设置系数：将应力转化为力 (N/MPa)
 cycles_per_hour = 1950.70866;      % 每小时循环次数
 step_size = 1000;                  % 计算周期 (cycles)
 reference_load = 1.0;              % 基准载荷 (N)：用于计算单位载荷下的应力强度因子
@@ -137,9 +137,9 @@ title('Synthetic Data Generation using Load Spectrum');
 fprintf('\n=== 生成的检查数据 (用于 pred_a_N 验证) ===\n');
 fprintf('t_check = [%s];\n', num2str(t_check, '%.4f '));
 fprintf('z = [%s];\n', num2str(z_inspected, '%.4f '));
-fprintf('真实参数 (log_theta1, theta2, theta3, k2): \n[%s]\n', num2str(true_params, '%.4f '));
+fprintf('真实参数 (log_theta1, theta2, theta3, k2): \n[%s]\n', num2str(true_params, '%.4e '));
 fprintf('应力-力转换系数: %.2f\n', stress_to_force);
 fprintf('===========================================\n');
 
 % 保存数据到 mat 文件方便后续调用
-save('For_PF/synthetic_load_spectrum_data.mat', 't_check', 'z_inspected', 'true_params', 'stress_to_force');
+save('For_PF/synthetic_data.mat', 't_check', 'z_inspected', 'true_params');

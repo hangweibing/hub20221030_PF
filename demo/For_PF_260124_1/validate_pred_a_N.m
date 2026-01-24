@@ -1,31 +1,24 @@
 %% 验证 pred_a_N 函数的测试脚本
-clear; clc;
+clear; clc; close all;
 
-f1 = -12.1389;
-f2 = 5.2672;
-f3 = -0.4580;
-k1 = 3.4441;
-k2 = 0.0294;
-
-% true_params = [f1, f2, f3, k1, k2]
-true_params = [f1, f2, f3, k1, k2];
 % 1. 输入从 gen_synthetic_data_spectrum.m 得到的数据
 t_check = [202.5475  405.0949  607.6424  810.1899 1012.7374 1215.2848 1417.8323 1620.3798 1822.9273];
 z = [10.5573 11.1964 11.9421 12.8326 13.9283 15.3444 17.3190 20.5362 30.0371];
-% true_params = [-12.5479, 3.9835, 0.3326, 6.6750]; % [log_theta1, theta2, theta3, k2]
+true_params = [-12.5479, 3.9835, 0.3326, 6.6750]; % [log_theta1, theta2, theta3, k2]
 
 % 2. 构造参数结构体 p
 p.theta = true_params;
 p.f = 100;                  % 应力-力转换系数 (stress_to_force)
-p.k = k2;      % k2
+p.k = true_params(4);      % k2
 p.W = 60;                  % 试样宽度
 p.B = 5;                   % 试样厚度
+p.ref_load = 1.0;          % 基准载荷
 p.cyclesperhour = 1950.70866;
 
 % 定义 da/dN 模型的占位符函数
 % 注意：pred_a_N 传入的 delta_K 和 Kmax 已经是力对应的 K 了
 p.eq_fun = @(dk_m, theta_vec, f_factor, k_val, kmax_m) ...
-    10.^(theta_vec(1) - theta_vec(3).*log10(theta_vec(4)) + (theta_vec(2) + theta_vec(3)).*log10(dk_m) + theta_vec(3).*(kmax_m./theta_vec(5) - 1));
+    (10^theta_vec(1)) * (dk_m.^theta_vec(2)) .* (max(kmax_m./theta_vec(4) - 1, 0).^theta_vec(3));
 
 % 3. 调用 fit_a_N 进行预测
 % 注意：我们需要调整 fit_a_N 内部的应力转换逻辑，或者在 fit_a_N 中加入 p.f 的使用
