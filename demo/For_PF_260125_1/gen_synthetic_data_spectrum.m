@@ -11,7 +11,7 @@ a0 = 10;                           % 初始裂纹长度 (mm)
 noise_std = 0.0;                   % 观测噪声标准差 (mm)
 stress_to_force = 100;              % 手动设置系数：将应力转化为力 (N/MPa)
 cycles_per_hour = 1950.70866;      % 每小时循环次数
-step_size = 10;                  % 计算周期 (cycles)
+step_size = 1000;                  % 计算周期 (cycles)
 reference_load = 1.0;              % 基准载荷 (N)：用于计算单位载荷下的应力强度因子
 
 SIM_SEED = 2025;

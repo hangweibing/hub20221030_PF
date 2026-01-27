@@ -9,10 +9,14 @@ k=p.parameter_K;
 k0=k;
 f0=f;
 omega0=[f0,k0];                       %放缩系数
+
+% --- 处理固定 k2 的逻辑 ---
+k_actual = k;
+if isfield(p, 'fix_k2') && p.fix_k2
+    k_actual(2) = p.k2_fixed_val;
+end
+% -----------------------
 [numData,~] =size(p.ytrain);
-delta_K=p.data_i(:,1);
-Kmax=p.data_i(:,2);
-ytrain=p.ytrain;
 num_p=size(p.diff_omega,2);
 num_f=num_p-2;
 p.num_p=num_p;
@@ -30,7 +34,7 @@ omega_merged=[f_merged,K_merged];
 showfigure=0;
 theta=p.theta;
 
-[~,Test_output] = Multi_R_check(p,showfigure,Const_pair_now,theta,k(1),k(2));
+[~,Test_output] = Multi_R_check(p,showfigure,Const_pair_now,theta,k_actual(1),k_actual(2));
 
 g_y_alpha=p.g_y_alpha_single;
 g_y_lambda1=p.g_y_lambda1_single;
@@ -48,15 +52,12 @@ fit_punish_1=g_y_lambda1*(R_physic_1_3+R_physic_2);
 omega0_punish_2 = [omega0(1:end-2), log10(omega0(end-1:end))];
 omega_merged_punish_2 = [omega_merged(1:end-2), log10(omega_merged(end-1:end))];
 fit_punish_2=g_y_lambda2*1/2/num_p*sum((omega0_punish_2-omega_merged_punish_2).^2);
-[fit_MSE, a_pred] = pred_a_N(p,f,k,Const_pair_now);
+[fit_MSE, a_pred] = pred_a_N(p,f,k_actual,Const_pair_now);
 %y_pre=p.eq_fun(delta_K, Const_pair_now, f, k, Kmax);                                %这个时候k,f是更新过的
 %fit_MSE=1/2/numData*sum((y_pre-ytrain).^2);
 loss_MSE_0=fit_MSE+fit_punish_1+fit_punish_2;
 
-fun = @(z) rosenbrockwithgrad_for_PF(z, p);
-
 % 2. 原始的上下界（在 x 空间里）
-% % 2. 原始的上下界（在 x 空间里）
 LB_orig = p.LB_orig;
 UB_orig = p.UB_orig;
 
@@ -65,19 +66,41 @@ ratio   = [LB_orig./omega0',  UB_orig./omega0'];
 LB      = min(ratio,[],2);   % 下界要取二者之小
 UB      = max(ratio,[],2);   % 上界要取二者之大
 
+% 固定参数设置
+if isfield(p, 'fix_k2') && p.fix_k2
+    % 固定参数 k1 (第4个元素) 和 k2 (第5个元素)
+    z0_f  = z0([1, 2, 3]);
+    LB_f  = LB([1, 2, 3]);
+    UB_f  = UB([1, 2, 3]);
+    fun_f = @(z_red) rosenbrockwithgrad_for_PF([z_red(1:3), 1, 1], p);
+else
+    % 仅固定参数 k1 (第4个元素)，优化其余 4 个位
+    z0_f  = z0([1, 2, 3, 5]);
+    LB_f  = LB([1, 2, 3, 5]);
+    UB_f  = UB([1, 2, 3, 5]);
+    fun_f = @(z_red) rosenbrockwithgrad_for_PF([z_red(1:3), 1, z_red(4)], p);
+end
+
 warning off;
 p.fmincon_option1.Display = 'iter';
 try
     % 这里是可能产生错误的代码
-    [z_opt, fval, exitflag, output] = fmincon( ...
-        fun,       ... % 目标函数
-        z0,        ... % 初始点
+    [z_opt_f, fval, exitflag, output] = fmincon( ...
+        fun_f,     ... % 目标函数
+        z0_f,      ... % 初始点
         [], [],    ... % 线性不等式 A, b
         [], [],    ... % 线性等式 Aeq, beq
-        LB, UB,    ... % 下界、上界
+        LB_f, UB_f,... % 下界、上界
         [],        ... % 非线性约束（这里无）
         p.fmincon_option1);
-    omega=z_opt.*omega0;
+
+    if isfield(p, 'fix_k2') && p.fix_k2
+        z_opt = [z_opt_f(1:3), 1, 1];
+        omega = z_opt .* [f0, k_actual(1), k_actual(2)]; % 使用 k2_fixed_val
+    else
+        z_opt = [z_opt_f(1:3), 1, z_opt_f(4)];
+        omega = z_opt .* omega0;
+    end
     loss_out_temp=fval;
 
     opti_mode_used=1;
@@ -86,21 +109,27 @@ catch ME
     fprintf('优化模式 1 出错: %s\n', ME.message);
     try
         % 这里是可能产生错误的代码
-        [z_opt, fval, exitflag, output] = fmincon( ...
-            fun,       ... % 目标函数
-            z0,        ... % 初始点
+        [z_opt_f, fval, exitflag, output] = fmincon( ...
+            fun_f,     ... % 目标函数
+            z0_f,      ... % 初始点
             [], [],    ... % 线性不等式 A, b
             [], [],    ... % 线性等式 Aeq, beq
-            LB, UB,    ... % 下界、上界
+            LB_f, UB_f,... % 下界、上界
             [],        ... % 非线性约束（这里无）
             p.fmincon_option2);
-        omega=z_opt.*omega0;
+
+        if isfield(p, 'fix_k2') && p.fix_k2
+            z_opt = [z_opt_f(1:3), 1, 1];
+            omega = z_opt .* [f0, k_actual(1), k_actual(2)];
+        else
+            z_opt = [z_opt_f(1:3), 1, z_opt_f(4)];
+            omega = z_opt .* omega0;
+        end
         loss_out_temp=fval;
 
         opti_mode_used=2;
-    catch ME2
+    catch
         % 在发生错误时执行的代码
-        fprintf('优化模式 2 出错: %s\n', ME2.message);
         z_opt=z0;
         fval=loss_MSE_0;
 
@@ -142,8 +171,7 @@ if test_index==1
     omega_merged_punish_2 = [omega_merged(1:end-2), log10(omega_merged(end-1:end))];
     fit_punish_2=g_y_lambda2*1/2/num_p*sum((omega_punish_2-omega_merged_punish_2).^2);
 
-    [fit_MSE, ~] = pred_a_N(p,f,k,Const_pair_now); % 使用优化后的参数重新计算MSE
-
+    [fit_MSE, ~] = pred_a_N(p,f,k,Const_pair_now);
     if isreal(fit_MSE) && isfinite(fit_MSE) && ~isnan(fit_MSE)
         pass_index = 1;
     else

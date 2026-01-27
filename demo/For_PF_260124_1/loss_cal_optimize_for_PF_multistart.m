@@ -39,7 +39,7 @@ function [loss_out, delta_kth_out, kc_out, theta_out, opti_mode_used, constraint
     % Storage for results
     all_results = cell(N_starts, 1);
     
-    parfor i = 1:N_starts
+    for i = 1:N_starts
     % parfor i = 1:N_starts
         p_local = p;
         % Set current starting point

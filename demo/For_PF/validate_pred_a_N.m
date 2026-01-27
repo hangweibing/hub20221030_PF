@@ -1,26 +1,27 @@
 %% 验证 pred_a_N 函数的测试脚本
 clear; clc;
 
-f1 = -13.8590;
-f2 = 3.0021;
-f3 = 0.6688;
-k1 = 0.0338;
-k2 = 1.7862;
-
-% true_params = [f1, f2, f3, k1, k2];
 % 1. 输入从 gen_synthetic_data_spectrum.m 得到的数据
-t_check = [202.5475  405.0949  607.6424  810.1899 1012.7374 1215.2848 1417.8323 1620.3798 1822.9273];
-z = [10.5573 11.1964 11.9421 12.8326 13.9283 15.3444 17.3190 20.5362 30.0371];
-% true_params = [-12.5479, 3.9835, 0.3326, 6.6750]; % [log_theta1, theta2, theta3, k2]
-log_theta1 = f1 - f3 * log10(k1)
-theta2 = f2 + f3
-theta3 = f3
-true_params = [log_theta1, theta2, theta3, k2];
+% step = 1000
+t_check = [110.3872 220.7745 331.1617 441.5489 551.9362 662.3234 772.7106 883.0979 993.4851];
+z = [10.9043 11.0747 12.2835 13.0287 14.2125 16.4101 17.4748 25.1182 30.2851];
 
-% 2. 构造参数结构体 p
-p.theta = true_params;
-p.f = 100;                  % 应力-力转换系数 (stress_to_force)
-p.k = k2;      % k2
+% step = 10;
+% t_check = [202.4079  404.8158  607.2238  809.6317 1012.0396 1214.4475 1416.8555 1619.2634 1821.6713];
+% z = [10.5570 11.1956 11.9409 12.8315 13.9263 15.3394 17.3111 20.5158 30.0000];
+% true_params = [-12.5479, 3.9835, 0.3326, 6.6750]; % [log_theta1, theta2, theta3, k2]
+
+% --- 参数设置 ---
+% 1. 真实参数 (用于生成参考轨迹)
+theta_true = [-12.5479, 3.983501235, 0.332574645, 6.674963682];
+
+% 2. 测试参数 (当前待验证的参数)
+theta_test = [-12.3768, 3.7946, 0.4378, 6.6750];
+
+p.theta = theta_test;
+p.f = 60;                  % 应力-力转换系数 (stress_to_force)
+
+p.k = 6.6750;      % k2
 p.W = 60;                  % 试样宽度
 p.B = 5;                   % 试样厚度
 p.cyclesperhour = 1950.70866;
@@ -42,23 +43,28 @@ p.eq_fun = @(dk_m, theta_vec, f_factor, k_val, kmax_m) ...
 
 fprintf('--- 开始验证 pred_a_N ---\n');
 
-% 执行预测
-tic;
-[mse, a_pred] = pred_a_N(p, t_check, z);
-toc;
+% 运行真实参数
+p.theta = theta_true;
+[mse_true, a_pred_true, da_hist_true] = pred_a_N(p, t_check, z);
+mse_true
+% 运行测试参数
+p.theta = theta_test;
+[mse_test, a_pred_test, da_hist_test] = pred_a_N(p, t_check, z);
+
+% 构造增长长度矩阵: 第一行真实，第二行测试
+% 注意：两者长度应一致，因为 N_check 相同
+da_matrix = [da_hist_true; da_hist_test];
 % 4. 可视化对比结果
 figure('Color', 'w');
 plot(t_check, z, 'ro', 'MarkerSize', 8, 'DisplayName', 'True Inspection (Noise Added)');
 hold on;
-plot(t_check, a_pred, 'b-o', 'LineWidth', 1.5, 'DisplayName', 'Predicted Trajectory');
+plot(t_check, a_pred_test, 'b-o', 'LineWidth', 1.5, 'DisplayName', 'Predicted (Test Params)');
+plot(t_check, a_pred_true, 'g--', 'LineWidth', 1.2, 'DisplayName', 'Predicted (True Params)');
 xlabel('Time (Flight hours)');
 ylabel('Crack Length (mm)');
-title(['Validation of pred\_a\_N (MSE: ', num2str(mse, '%.4f'), ')']);
+title(['Validation of pred\_a\_N (MSE: ', num2str(mse_test, '%.4f'), ')']);
 legend('Location', 'best');
 grid on;
 
-fprintf('预测均方误差 MSE: %.6f\n', mse);
-fprintf('预测值 a_pred:\n');
-disp(a_pred);
-fprintf('真实值 z:\n');
-disp(z);
+fprintf('测试参数均方误差 MSE: %.6f\n', mse_test);
+
