@@ -138,10 +138,10 @@ parameter_gp.theta=theta;
 parameter_gp.parameter_K=parameter_K;
 parameter_gp.ytrain=ytrain;
 
-[loss,delta_kth,kc,theta,opti_mode_used,constraint_wrong,pass_index]=loss_cal_optimize_for_PF(parameter_gp);
+% [loss,delta_kth,kc,theta,opti_mode_used,constraint_wrong,pass_index]=loss_cal_optimize_for_PF(parameter_gp);
 kc
 theta
-% N_starts = 10; % 手动设置起始点数量
-% [loss,delta_kth,kc,theta,opti_mode_used,constraint_wrong,pass_index]=loss_cal_optimize_for_PF_multistart(parameter_gp, pop_now, N_starts);
+N_starts = 10; % 手动设置起始点数量
+[loss,delta_kth,kc,theta,opti_mode_used,constraint_wrong,pass_index]=loss_cal_optimize_for_PF_multistart(parameter_gp, pop_now, N_starts);
 
 

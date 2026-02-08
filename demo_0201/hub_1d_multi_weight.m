@@ -22,18 +22,18 @@ R_noise = 0.5;                              % 观测噪声方差
 
 % 参数拟合模式配置
 fit_fix_mode = 'theta3';                    % 'k2': 固定 k2, 优化 theta; 'theta3': 固定 theta3, 优化 k2
-k2_fixed_val = 0.394;                       % 当 fit_fix_mode='k2' 时生效
+k2_fixed_val = 0.3940;                       % 当 fit_fix_mode='k2' 时生效
 theta3_fixed_val = 0.1603;                  % 当 fit_fix_mode='theta3' 时生效
 
 % 载荷与几何参数
-spectrum_factor = 18;                       % 载荷-应力转化系数
+spectrum_factor = 15;                       % 载荷-应力转化系数
 ref_load = 100;                             % 基准载荷
 W = 60;                                     % 试样宽度 (mm)
 B = 5;                                      % 试样厚度 (mm)
 
 % 真实材料参数 (Ground Truth, 用于对比)
 % log_theta1=-9.7360, theta2=2.6089, theta3=0.1603, k2=0.3940
-TRUE_PARAMS = [-9.7360, 2.6089, 0.1603, 0.3940]; 
+TRUE_PARAMS = [-9.7360  2.6089  0.1603  0.3940]; 
 true_log_theta1 = TRUE_PARAMS(1);
 true_theta2 = TRUE_PARAMS(2);
 true_theta3 = TRUE_PARAMS(3);
@@ -65,8 +65,8 @@ visualize_parameter_distribution(particle_params, 'AM-TC4-GRO.xlsx');
 %% ===================================================================
 % t_check = [9.1412  18.2824  27.4236  36.5648  45.7061  54.8473  63.9885  73.1297  82.2709  91.4121 100.5533 109.6945 118.8358 127.9770 137.1182 146.2594 155.4006 164.5418 173.6830];
 % z = [10.7228 10.1331 10.0000 10.4430 11.6325 12.7796 13.1123 13.2576 13.8628 14.1211 15.8897 16.1198 18.7390 18.2017 19.3229 20.6861 22.0494 25.5740 30.3130];
-t_check = [101.6246  203.2492  304.8738  406.4984  508.1230  609.7476  711.3722  812.9969  914.6215 1016.2461];
-z = [11.0602 11.5070 12.9673 13.4202 15.3420 15.9837 18.7313 20.3204 24.5301 30.0104];
+t_check = [170.5021  341.0043  511.5064  682.0086  852.5107 1023.0128 1193.5150 1364.0171 1534.5193 1705.0214];
+z = [10.8030 11.7115 12.7483 13.9252 15.1741 16.6060 18.1905 20.3597 23.8037 30.0027];
 
 %% ===================================================================
 %% 3. 数据载入与 GP 模型配置
@@ -88,10 +88,10 @@ options_fmincon_1 = optimoptions('fmincon', ...
     'Algorithm', 'interior-point', ...
     'SpecifyObjectiveGradient',false, ...
     'OptimalityTolerance', 1e-8, ...
-    'StepTolerance', 1e-10, ...
+    'StepTolerance', 1e-8, ...
     'FunctionTolerance', 1e-6, ...
-    'MaxIterations', 2000, ...
-    'MaxFunctionEvaluations', 2000, ...
+    'MaxIterations', 800, ...
+    'MaxFunctionEvaluations', 1200, ...
     'Display', 'off');
 
 options_fmincon_2 = optimoptions('fmincon', ...
@@ -206,27 +206,18 @@ end
 current_weight = 1/N * ones(N, 1);
 
 %% ===================================================================
-%% 5. 数据存储初始化 (使用 matfile + 内存缓冲区)
+%% 5. 数据存储初始化 (预分配内存空间)
 %% ===================================================================
-% 存储文件名
-history_file = 'pf_demo_simulation_history.mat';
-if exist(history_file, 'file'), delete(history_file); end
-mfile = matfile(history_file, 'Writable', true);
+% 计算大概需要的总步数，用于预分配空间
+max_hours = t_check(end);
+estimated_steps = ceil(max_hours * cycles_per_hour / step) + 100; 
 
-SAVE_INTERVAL = 100; % 每 100 步保存一次磁盘
-buffer_step_counter = 0;
-
-% 在内存中预分配缓冲区
-buf_Xpf = zeros(5, SAVE_INTERVAL);
-buf_a_upper = zeros(1, SAVE_INTERVAL);
-buf_a_lower = zeros(1, SAVE_INTERVAL);
-buf_POF = zeros(SAVE_INTERVAL, 1);
-
-% 预留最终存储 (用于绘图，根据实际步数增长)
-Xpf = []; 
-a_upper = []; 
-a_lower = []; 
-POF_array = [];
+Xpf = zeros(5, estimated_steps); 
+a_upper = zeros(1, estimated_steps); 
+a_lower = zeros(1, estimated_steps); 
+param_upper = zeros(4, estimated_steps); % 新增：4个参数的上边界 (95%)
+param_lower = zeros(4, estimated_steps); % 新增：4个参数的下边界 (5%)
+POF_array = zeros(estimated_steps, 1);
 
 mu_Kc = 33.4;
 std_Kc = 3.34;
@@ -236,13 +227,9 @@ v_mask = ~isnan(xparticle_curr(:, 1));
 Xpf(:, 1) = mean(xparticle_curr(v_mask, :))';
 a_upper(1) = prctile(xparticle_curr(v_mask, 1), p_up);
 a_lower(1) = prctile(xparticle_curr(v_mask, 1), p_low);
+param_upper(:, 1) = prctile(xparticle_curr(v_mask, 2:5), 95, 1)'; % 90% 置信区间
+param_lower(:, 1) = prctile(xparticle_curr(v_mask, 2:5), 5, 1)';
 POF_array(1) = 0;
-
-% 将初始点写入 matfile
-mfile.Xpf(1:size(Xpf,1), 1) = Xpf(:, 1);
-mfile.a_upper(1, 1) = a_upper(1);
-mfile.a_lower(1, 1) = a_lower(1);
-mfile.POF_array(1, 1) = POF_array(1);
 
 %% ===================================================================
 %% 6. 粒子滤波主循环
@@ -344,18 +331,16 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
 
     xparticle_curr = x_next_temp;
 
-    % 记录到缓冲区
-    buffer_step_counter = buffer_step_counter + 1;
-    
+    % --- 记录当前步统计量 (直接写入内存数组) ---
     valid_mask = ~isnan(xparticle_curr(:, 1));
     if any(valid_mask)
         cur_Xpf = mean(xparticle_curr(valid_mask, :))';
         cur_a_up = prctile(xparticle_curr(valid_mask, 1), p_up);
         cur_a_low = prctile(xparticle_curr(valid_mask, 1), p_low);
     else
-        cur_Xpf = Xpf(:, end);
-        cur_a_up = a_upper(end);
-        cur_a_low = a_lower(end);
+        cur_Xpf = Xpf(:, m-1);
+        cur_a_up = a_upper(m-1);
+        cur_a_low = a_lower(m-1);
     end
     
     % 计算失效概率 POF
@@ -372,36 +357,23 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
             fprintf('======================================\n');
         end
     else
-        if ~isempty(POF_array)
-            cur_POF = POF_array(end);
-        else
-            cur_POF = 0;
-        end
+        cur_POF = POF_array(m-1);
     end
     
-    buf_Xpf(:, buffer_step_counter) = cur_Xpf;
-    buf_a_upper(buffer_step_counter) = cur_a_up;
-    buf_a_lower(buffer_step_counter) = cur_a_low;
-    buf_POF(buffer_step_counter) = cur_POF;
-
-    % 每隔 SAVE_INTERVAL 批量写入 matfile
-    if buffer_step_counter >= SAVE_INTERVAL || (m*step/cycles_per_hour > t_check(end))
-        start_idx = m - buffer_step_counter + 1;
-        end_idx = m;
-        
-        mfile.Xpf(1:size(buf_Xpf, 1), start_idx:end_idx) = buf_Xpf(:, 1:buffer_step_counter);
-        mfile.a_upper(1, start_idx:end_idx) = buf_a_upper(1, 1:buffer_step_counter);
-        mfile.a_lower(1, start_idx:end_idx) = buf_a_lower(1, 1:buffer_step_counter);
-        mfile.POF_array(start_idx:end_idx, 1) = buf_POF(1:buffer_step_counter, 1);
-        
-        % 同时将其同步到主内存变量，以便后续绘图 (或者在最后统一读取)
-        Xpf = [Xpf, buf_Xpf(:, 1:buffer_step_counter)];
-        a_upper = [a_upper, buf_a_upper(1:buffer_step_counter)];
-        a_lower = [a_lower, buf_a_lower(1:buffer_step_counter)];
-        POF_array = [POF_array; buf_POF(1:buffer_step_counter)];
-        
-        buffer_step_counter = 0; % 重置缓冲区
+    Xpf(:, m) = cur_Xpf;
+    a_upper(m) = cur_a_up;
+    a_lower(m) = cur_a_low;
+    
+    % 记录参数的 90% 置信区间
+    if any(valid_mask)
+        param_upper(:, m) = prctile(xparticle_curr(valid_mask, 2:5), 95, 1)';
+        param_lower(:, m) = prctile(xparticle_curr(valid_mask, 2:5), 5, 1)';
+    else
+        param_upper(:, m) = param_upper(:, m-1);
+        param_lower(:, m) = param_lower(:, m-1);
     end
+    
+    POF_array(m) = cur_POF;
 
     %% 观测更新步骤
     if ((m-1)*step/cycles_per_hour < t_check(j)) && (m*step/cycles_per_hour >= t_check(j))
@@ -420,7 +392,7 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
             p_model.num_of_data_a_N = size(p_model.data_a_N, 1);
             
             % 执行多起始点优化
-            N_starts_opt = 15;
+            N_starts_opt = 13;
             [~, delta_kth_fit, kc_fit, theta_fit, ~, ~, pass_idx] = ...
                 loss_cal_optimize_for_PF_multistart(p_model, pop_now, N_starts_opt, prev_PARA0_fit);
             
@@ -440,10 +412,6 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
                 param_obs = [theta_fit(1), theta_fit(3), theta_fit(2), kc_fit];
                 fit_triggered = true;
                 
-                % 更新 p_model 初始点
-                p_model.PARA0 = new_fit;
-                p_model.parameter_K = p_model.PARA0(1:2);
-                p_model.theta = p_model.PARA0(3:end);
             else
                 fprintf('  [参数拟合] 拟合未通过约束检查，本步参数不更新权重。\n');
             end
@@ -480,27 +448,48 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
         % --- [Multi-Weight] 3. 可视化似然权重分布 (新增) ---
         if ~exist('param_obs', 'var'), param_obs = []; end
         plot_multi_weight_distribution(xparticle_curr, multi_weights, j, t_check(j), z(j), param_obs, TRUE_PARAMS);
+        
+        % --- [新增] 可视化 4 个参数随时间的变化 (90% 置信区间) ---
+        plot_parameter_evolution(Xpf(2:5, 1:m), param_upper(:, 1:m), param_lower(:, 1:m), ...
+            (0:m-1)*step/cycles_per_hour, j, TRUE_PARAMS);
 
-        % --- [Multi-Weight] 4. 归一化与重采样 ---
+        % --- [Multi-Weight] 4. 联合权重重采样 (改进版) ---
+        % 配置重采样选项
+        resample_opts = struct();
+        resample_opts.weight_mode = 'min_normalized';      % 使用乘积模式组合各维度权重
+        resample_opts.kernel_scale = 0.3;           % 核函数带宽缩放因子（可调）
+        
         % 注意：重采样需在绘图之后进行，因为绘图需要展示采样前的分布状况
-        xparticle_curr = resample_particles_independent(xparticle_curr, multi_weights);
+        xparticle_curr = resample_particles_joint(xparticle_curr, multi_weights, resample_opts);
         
         % 这里的 current_weight 仅作为均值计算的占位，设为 1/N
         current_weight = (1/N) * ones(N, 1);
 
-        % 重采样后重新计算统计量并更新缓冲区（确保绘图连续且包含后验信息）
+        % 重采样后重新计算统计量并更新（确保绘图包含后验信息）
         valid_mask_res = ~isnan(xparticle_curr(:, 1));
         if any(valid_mask_res)
-            % 更新当前步的后验统计量
-            cur_Xpf = mean(xparticle_curr(valid_mask_res, :))';
-            cur_a_up = prctile(xparticle_curr(valid_mask_res, 1), p_up);
-            cur_a_low = prctile(xparticle_curr(valid_mask_res, 1), p_low);
-            
-            % 更新缓冲区中的当前步数据，避免直接索引 a_upper 导致 MATLAB 填充零
-            buf_Xpf(:, buffer_step_counter) = cur_Xpf;
-            buf_a_upper(buffer_step_counter) = cur_a_up;
-            buf_a_lower(buffer_step_counter) = cur_a_low;
+            Xpf(:, m) = mean(xparticle_curr(valid_mask_res, :))';
+            a_upper(m) = prctile(xparticle_curr(valid_mask_res, 1), p_up);
+            a_lower(m) = prctile(xparticle_curr(valid_mask_res, 1), p_low);
         end
+
+        % --- [新增] 实时绘制裂纹长度图并保存 ---
+        fig_rt = figure('Name', sprintf('Crack Length Realtime - Obs %d', j), 'Visible', 'off', 'Position', [100, 100, 1000, 600], 'Color', 'w');
+        cur_time_axis = (0:m-1) * step / cycles_per_hour;
+        plot(t_check(1:j), z(1:j), '^', 'LineWidth', 2, 'MarkerSize', 10, 'MarkerFaceColor', 'k'); hold on;
+        plot(cur_time_axis, Xpf(1, 1:m), 'b', 'LineWidth', 3); hold on;
+        plot(cur_time_axis, a_upper(1:m), 'r--', 'LineWidth', 2); hold on;
+        plot(cur_time_axis, a_lower(1:m), 'r--', 'LineWidth', 2); hold off;
+        xlabel('Flight hours/h', 'FontSize', 12); ylabel('Crack length/mm', 'FontSize', 12);
+        legend('Experimental value', 'Prediction mean', sprintf('%.1f%% bounds', p_up - p_low), 'Location', 'best');
+        title(sprintf('Crack Growth Real-time Prediction (Obs %d, Time %.2f h)', j, t_check(j)));
+        grid on; set(gca, 'gridlinestyle', ':', 'gridcolor', 'k');
+        
+        % 确保保存文件夹存在 (使用与权重分布图一致的文件夹)
+        save_path_rt = 'MultiWeight_Dist_Results';
+        if ~exist(save_path_rt, 'dir'), mkdir(save_path_rt); end
+        saveas(fig_rt, fullfile(save_path_rt, sprintf('CrackLength_Obs_%d.png', j)));
+        close(fig_rt);
 
         j = j + 1;
     end

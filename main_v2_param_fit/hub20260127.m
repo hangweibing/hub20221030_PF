@@ -19,9 +19,16 @@ set(groot, 'defaultAxesTickLabelInterpreter', 'none');
 SIM_SEED = 2023;  % 您可以修改此数值来获得不同的随机序列
 rng(SIM_SEED);    % 设置全局随机数种子
 
+% 真实材料参数 (可选，用于对比，若没有则设为 [])
+TRUE_PARAMS = [-9.7360, 2.6089, 0.1603, 0.3940]; 
+true_log_theta1 = TRUE_PARAMS(1);
+true_theta2 = TRUE_PARAMS(2);
+true_theta3 = TRUE_PARAMS(3);
+true_k2 = TRUE_PARAMS(4);
+
 % 添加路径（可选）
 % addpath surModelPackage
-addpath(genpath('Param_fit'))      % 添加Param_fit及其子文件夹
+addpath(genpath('For_PF_260131_1'))      % 添加Param_fit及其子文件夹
 
 % 初始化 KDE 采样
 kde_sampling('preprocess');
@@ -34,9 +41,15 @@ kde_sampling('preprocess');
 % Debug模式开关
 DEBUG_MODE = false;                    % 设置为 true 开启debug模式，false 关闭
 
+% 参数拟合模式配置
+fit_fix_mode = 'theta3';                    % 'k2': 固定 k2, 优化 theta; 'theta3': 固定 theta3, 优化 k2; 'none': 都不固定
+k2_fixed_val = 0.394;                       % 当 fit_fix_mode='k2' 时生效
+theta3_fixed_val = 0.1603;                  % 当 fit_fix_mode='theta3' 时生效
+
 % 基本粒子滤波参数
 n = 1;                                    % 状态向量的维度（每个粒子）
-N = 200;                                  % 粒子数量
+N = 100;                                  % 粒子数量
+step = 1000;                              % 每步循环次数
 v_sphere = 2;                             % 一维空间维度参数
 
 % 正则化粒子滤波参数计算
@@ -170,11 +183,6 @@ buffer_upcrackparticles = zeros(N, SAVE_INTERVAL);
 % buffer_weight = zeros(N, SAVE_INTERVAL);
 buffer_step_counter = 0;  % 缓冲区当前累积的步数
 
-% 统计量和观测矩阵（规模较小，可保留在内存中）
-% Xpf = zeros(46, 1000);                   % 滤波估计值均值
-% xparticle_cov = zeros(46, 46, 1000);     % 协方差矩阵
-POF_array = zeros(1000, 1);              % 失效概率数组
-% D = zeros(46, 1000);                     % 协方差对角线（RPF残余）
 
 % 内存中的粒子状态缓冲区（仅保留当前步和下一步，极大地节省 RAM）
 xparticle_curr = zeros(N, 46);
@@ -195,6 +203,22 @@ xparticle_curr = zeros(N, 46);
 % 实际使用的观测数据（钛合金）
 t_check = [1.0000e+02 6.0591e+02 1.1118e+03 1.6177e+03 2.1236e+03 2.6295e+03 3.1355e+03 3.6414e+03 4.1473e+03 4.6532e+03];
 z       = [3.2041e+01 3.2247e+01 3.2451e+01 3.2678e+01 3.2988e+01 3.3537e+01 3.5950e+01 4.0230e+01 4.4797e+01 5.0000e+01];
+
+% t_check = [20, 60, 100, 140, 180, 220, 260, 300, 340];
+% z = [13.194, 14.381, 15.281, 16.063, 16.888, 17.622, 18.341, 19.044, 19.694] + 30;
+
+% 统计量和观测矩阵（规模较小，可保留在内存中）
+% 计算大概需要的总步数，用于预分配空间
+max_hours = t_check(end);
+estimated_steps = ceil(max_hours * cyclesperhour / step) + 100; 
+
+Xpf = zeros(46, estimated_steps);                   % 滤波估计值均值
+% xparticle_cov = zeros(46, 46, 1000);     % 协方差矩阵
+a_upper = zeros(1, estimated_steps);
+a_lower = zeros(1, estimated_steps);
+POF_array = zeros(estimated_steps, 1);              % 失效概率数组
+% D = zeros(46, 1000);                     % 协方差对角线（RPF残余）
+
 
 % 观测相关参数
 zPred = zeros(N, 1);                     % 预测观测值
@@ -240,6 +264,13 @@ for i = 1:N   % 遍历所有粒子
         k2 = particle_params(i, 4);
     end
 
+    % --- 物理一致性修正：强制执行参数固定逻辑 ---
+    if strcmp(fit_fix_mode, 'k2')
+        k2 = k2_fixed_val;       % 强制所有粒子使用固定的 k2
+    elseif strcmp(fit_fix_mode, 'theta3')
+        theta3 = theta3_fixed_val; % 强制所有粒子使用固定的 theta3
+    end
+
     % 使用新的变量名（已从预采样参数映射）
     %% 几何参数采样（裂纹尺寸）
     a = normrnd(2, 0.05, 1, 1);  % 裂纹半径（均值2mm，标准差0.05mm）
@@ -257,6 +288,13 @@ for i = 1:N   % 遍历所有粒子
     xparticle_curr(i, :) = [yIniRegSet, zIniRegSet, log_theta1_, theta2, theta3, k2];
 end
 
+% 打印状态以验证
+if strcmp(fit_fix_mode, 'k2')
+    fprintf('  [物理约束] 已强制固定所有粒子的 k2 = %.4f\n', k2_fixed_val);
+elseif strcmp(fit_fix_mode, 'theta3')
+    fprintf('  [物理约束] 已强制固定所有粒子的 theta3 = %.4f\n', theta3_fixed_val);
+end
+
 % 初始化粒子权重
 current_weight = 1/N * ones(N, 1);
 
@@ -264,6 +302,16 @@ current_weight = 1/N * ones(N, 1);
 buffer_step_counter = 1;
 % buffer_xparticle(:, :, 1) = xparticle_curr;
 buffer_upcrackparticles(:, 1) = xparticle_curr(:, 42);
+
+% --- [修复] 初始化初始时刻的统计量 ---
+valid_mask_init = ~isnan(xparticle_curr(:, 1));
+if any(valid_mask_init)
+    Xpf(:, 1) = mean(xparticle_curr(valid_mask_init, :))';
+    a_upper(1) = prctile(xparticle_curr(valid_mask_init, 42), 99.9);
+    a_lower(1) = prctile(xparticle_curr(valid_mask_init, 42), 0.1);
+end
+% -------------------------------------
+
 % buffer_log_theta1_particles(:, 1) = xparticle_curr(:, 43);
 % buffer_theta2_particles(:, 1) = xparticle_curr(:, 44);
 % buffer_theta3_particles(:, 1) = xparticle_curr(:, 45);
@@ -302,13 +350,10 @@ spectra = spectra(2:end);
 %% 参数拟合初始化（用于观测步）
 %% ===================================================================
 % 加载参数拟合所需的 GP 模型和人口数据
-load('AM-TC4-GRO_260123_merged.mat');
-load('parameter_gp_AM-TC4-GRO_combine.mat');
-
-% 这里假设 spectra 已经在上面加载过了，如果需要使用特定的 fake 谱，请取消注释
-% data_spec = load('AsteixSpectraData_fake.mat', 'spectra');
-% parameter_gp.spectra = data_spec.spectra;
-parameter_gp.spectra = spectra; % 使用当前主程序的载荷谱
+load('For_PF_260131_1/AM-TC4-GRO_260123_merged.mat');
+load('For_PF_260131_1/parameter_gp_AM-TC4-GRO_combine.mat');
+p_model = parameter_gp;  % 创建副本，与 demo 代码保持一致
+p_model.spectra = spectra; % 使用当前主程序的载荷谱
 
 % 初始化优化参数
 options_fmincon_1 = optimoptions('fmincon', ...
@@ -331,22 +376,36 @@ options_fmincon_2 = optimoptions('fmincon', ...
     'MaxFunctionEvaluations', 1000, ...
     'Display', 'off');
 
-parameter_gp.fmincon_option1 = options_fmincon_1;
-parameter_gp.fmincon_option2 = options_fmincon_2;
+p_model.fmincon_option1 = options_fmincon_1;
+p_model.fmincon_option2 = options_fmincon_2;
 
 % 设置初始参数
-parameter_gp.PARA0 = pop_now{1,6};
+p_model.PARA0 = pop_now{1,6};
+p_model.PARA0 = (p_model.PARA0(:))'; % 强制转换为行向量
 
-% k2 固定设置
-parameter_gp.fix_k2 = true; 
-parameter_gp.k2_fixed_val = 0.3940;
+% 参数固定逻辑设置
+if strcmp(fit_fix_mode, 'k2')
+    p_model.fix_k2 = true; 
+    p_model.k2_fixed_val = k2_fixed_val;
+    p_model.fix_theta3 = false;
+    fprintf('[参数固定] 已设置固定 k2 = %.4f\n', k2_fixed_val);
+elseif strcmp(fit_fix_mode, 'theta3')
+    p_model.fix_k2 = false; 
+    p_model.fix_theta3 = true;
+    p_model.theta3_fixed_val = theta3_fixed_val;
+    fprintf('[参数固定] 已设置固定 theta3 = %.4f\n', theta3_fixed_val);
+else
+    p_model.fix_k2 = false;
+    p_model.fix_theta3 = false;
+    fprintf('[参数固定] 未固定任何参数，所有参数将参与优化\n');
+end
 
 % 初始化边界
-theta_init = parameter_gp.PARA0(3:end);
+theta_init = p_model.PARA0(3:end);
 theta_gene = theta_init(2:end-1);
-f_L = zeros(parameter_gp.numGenes, 1);
-f_U = zeros(parameter_gp.numGenes, 1);
-for pp = 1:parameter_gp.numGenes
+f_L = zeros(p_model.numGenes, 1);
+f_U = zeros(p_model.numGenes, 1);
+for pp = 1:p_model.numGenes
     if theta_gene(pp) > 0
         f_L(pp) = 0.1; f_U(pp) = 10;
     elseif theta_gene(pp) < 0
@@ -355,27 +414,32 @@ for pp = 1:parameter_gp.numGenes
         f_L(pp) = 0; f_U(pp) = 0;
     end
 end
-parameter_gp.LB_orig = [-15; f_L; 1; 0; 0];
-parameter_gp.UB_orig = [-5; f_U; 10; 500; 500];
+p_model.LB_orig = [-15; f_L; 1; 0; 0];
+p_model.UB_orig = [-5; f_U; 10; 500; 500];
 
 % 处理 evalstr
-evalstr = parameter_gp.evalstr1;
+evalstr = p_model.evalstr1;
+if iscell(evalstr), evalstr = evalstr{1}; end % 确保是字符串而非 cell
 evalstr = regexprep(evalstr, 'c(\d+)', 'Const_pair_now($1)');
 evalstr = regexprep(evalstr, 'x(\d+)', 'xtrain(:,$1)');
-parameter_gp.evalstr2 = evalstr;
+p_model.evalstr2 = evalstr;
 
 % 其他必要的参数设置
-parameter_gp.parameter_K = parameter_gp.PARA0(1:2);
-parameter_gp.theta = theta_init;
-parameter_gp.ytrain = 0.7; 
-parameter_gp.cyclesperhour = cyclesperhour;
+p_model.parameter_K = p_model.PARA0(1:2);
+p_model.theta = theta_init;
+p_model.theta_end_limit = [-100, 100]; % 补齐缺失的约束范围变量
+p_model.ytrain = 0.7; 
+p_model.cyclesperhour = cyclesperhour;
 
 % 封装仿真相关参数，以便传递给 pred_a_N
-parameter_gp.spectrum_factor = 60; % 默认值，根据 a2aFunc 内部可能是 36.7
-parameter_gp.ref_load = 100;
-parameter_gp.W = 60;
-parameter_gp.B = 5;
-parameter_gp.step_size = step;
+p_model.spectrum_factor = 60;
+p_model.ref_load = 100;
+p_model.W = 60;
+p_model.B = 5;
+p_model.step_size = step;
+
+% 将 p_model 赋值回 parameter_gp 以便后续使用
+parameter_gp = p_model;
 
 % (平均应力计算已移除，改为直接在 a2aFunc 中循环处理载荷谱)
 
@@ -435,8 +499,10 @@ averInput_splitted_2 = averInput_splitted{2};
 %% ===================================================================
 
 total_tic = tic;  % 初始化总耗时计时器
-while (m-1)*step/1950.70866 <= t_check(end)
+prev_PARA0_fit = []; % 用于存储拟合结果历史
+while (m-1)*step/cyclesperhour <= t_check(end)
     iter_tic = tic;  % 初始化当前步耗时计时器
+    xparticle_prev = xparticle_curr;
     %% 时间步数据准备 (载荷谱段提取)
     % 提取当前 step (1000个循环) 的载荷段
     idx_start = 2 * (m-2) * step + 1;
@@ -452,7 +518,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     x_next_temp = zeros(N, 46);
     splitted_update = zeros(1, N);
 
-    parfor (i = 1:N)
+    for (i = 1:N)
         try
             %% 粒子级变量初始化
             curUinput = {};
@@ -541,15 +607,19 @@ while (m-1)*step/1950.70866 <= t_check(end)
     % 默认本步权重（观测前）为均匀分布
     current_weight = 1/N * ones(N, 1);
 
-    %     if any(valid_mask)
-    %         Xpf(:, m) = (mean(xparticle_curr(valid_mask, :)))';
-    %         xparticle_cov(:, :, m) = cov(xparticle_curr(valid_mask, :));
-    %     else
-    %         Xpf(:, m) = Xpf(:, m-1); % 如果全部失效，保持不变
-    %     end
+    if any(valid_mask)
+        Xpf(:, m) = (mean(xparticle_curr(valid_mask, :)))';
+        a_upper(m) = prctile(xparticle_curr(valid_mask, 42), 99.9);
+        a_lower(m) = prctile(xparticle_curr(valid_mask, 42), 0.1);
+        % xparticle_cov(:, :, m) = cov(xparticle_curr(valid_mask, :));
+    else
+        Xpf(:, m) = Xpf(:, m-1); % 如果全部失效，保持不变
+        a_upper(m) = a_upper(m-1);
+        a_lower(m) = a_lower(m-1);
+    end
 
     %% 计算POF（！！！！！注意K的单位换算！！！！！）
-        % [注] POF 计算目前依赖 deltaKSet。a2aFunc 已更新为返回该载荷段内最大循环的 K 均值。
+    try
         valid_K = particles_deltaK_max_temp(~isnan(particles_deltaK_max_temp));
         if ~isempty(valid_K)
             % 这里假设 K 已通过 a2aFunc 内部处理为有效的 Kmax (或 ΔK/1-R)
@@ -562,62 +632,137 @@ while (m-1)*step/1950.70866 <= t_check(end)
     end
 
     %% 观测更新步骤（当到达观测时刻时）
-    if ((m-1)*step/1950.70866 < t_check(j)) && (m*step/1950.70866 >= t_check(j))
-        %% 计算似然权重
-        zPred_curr = xparticle_curr(:, 42);
-        weights_temp = zeros(N, 1);
-        for i = 1:N
-            if isnan(zPred_curr(i))
-                weights_temp(i) = 1e-99;
-                continue;
+    if ((m-1)*step/cyclesperhour < t_check(j)) && (m*step/cyclesperhour >= t_check(j))
+        fprintf('  [观测更新] 时间: %.2f h, 观测值: %.2f mm\n', t_check(j), z(j));
+
+        % --- [Multi-Weight] 1. 参数拟合 (得到参数的"观测值") ---
+        % 初始化多维度权重矩阵 [N x 5] (z_up, log_theta1, theta2, theta3, k2)
+        multi_weights = ones(N, 5) / N; 
+        
+        % 在第一次观测时，保存权重最大粒子的几何信息作为拟合起始点
+        if j == 1
+            % 计算裂纹长度权重（仅用于找最佳粒子）
+            zPred_curr = xparticle_curr(:, 42);
+            weights_temp = zeros(N, 1);
+            for i = 1:N
+                if isnan(zPred_curr(i))
+                    weights_temp(i) = 1e-99;
+                else
+                    res = z(j) - zPred_curr(i);
+                    weights_temp(i) = (1/sqrt(2*pi*R)) * exp(-0.5*(res^2)/R) + 1e-99;
+                end
             end
-            res = z(j) - zPred_curr(i);
-            weights_temp(i) = (1/sqrt(2*pi*R)) * exp(-0.5*(res^2)/R) + 1e-99;
+            % 找到权重最大的粒子
+            [~, best_idx] = max(weights_temp);
+            % 保存该粒子的几何信息 (y坐标集 + z坐标集)
+            parameter_gp.init_geometry = struct();
+            parameter_gp.init_geometry.yRegSet = xparticle_curr(best_idx, 1:21);
+            parameter_gp.init_geometry.zRegSet = xparticle_curr(best_idx, 22:42);
+            fprintf('  [初始几何] 已保存粒子 %d 的几何信息作为拟合起始点 (z_end=%.4f)\n', ...
+                best_idx, xparticle_curr(best_idx, 42));
         end
-
-        %% 归一化权重
-        current_weight = weights_temp ./ sum(weights_temp);
-
-        %         %% 更新状态估计
-        %         Xpf(:, m) = (xparticle_curr' * current_weight);
-        %
-        %         %% 更新协方差
-        %         diff = xparticle_curr - Xpf(:, m)';
-        %         xparticle_cov(:, :, m) = (diff' .* current_weight') * diff;
-
-        %% [新增] 参数拟合功能 (仅验证，不回传)
-        % 第一步不拟合，之后每步根据 1 到 j 次观测数据进行拟合
+        
+        fit_triggered = false;
         if j > 1
-            fprintf('  [参数拟合] 正在根据前 %d 次观测数据进行参数拟合 (起点为第 1 次观测)...\n', j);
+            fprintf('  [参数拟合] 正在根据前 %d 次观测数据进行多起始点拟合...\n', j);
             
             % 准备拟合所需的历史观测数据 (1 到 j)
             parameter_gp.data_a_N = [t_check(1:j)', z(1:j)'];
             parameter_gp.num_of_data_a_N = size(parameter_gp.data_a_N, 1);
             
-            % 执行优化 (仅验证拟合功能，暂不更新粒子参数)
+            % 执行多起始点优化
+            N_starts_opt = 10;
             [~, delta_kth_fit, kc_fit, theta_fit, ~, ~, pass_idx] = ...
-                loss_cal_optimize_for_PF(parameter_gp);
+                loss_cal_optimize_for_PF_multistart(parameter_gp, pop_now, N_starts_opt);
             
             if pass_idx == 1
-                fprintf('  [参数拟合] 拟合成功！结果：f1=%.4f, f2=%.4f, f3=%.4f, kc=%.4f\n', ...
+                % 注意: theta_fit = [log_theta1, theta3, theta2]
+                fprintf('  [参数拟合] 拟合成功！结果：f1=%.4f, f2(theta3)=%.4f, f3(theta2)=%.4f, kc=%.4f\n', ...
                     theta_fit(1), theta_fit(2), theta_fit(3), kc_fit);
                 
-                % 更新 parameter_gp 的初始值，以便下一次拟合从当前结果开始
-                parameter_gp.PARA0(3:5) = theta_fit;
-                parameter_gp.PARA0(2) = kc_fit; 
-                parameter_gp.PARA0(1) = delta_kth_fit;
+                % 保存拟合结果供下一次拟合参考
+                new_fit = [delta_kth_fit, kc_fit, theta_fit'];
+                prev_PARA0_fit = [prev_PARA0_fit; new_fit];
+                
+                % 设置参数观测值
+                % theta_fit 顺序 (PARA0): [log_theta1, theta3, theta2]
+                % 粒子状态顺序: [log_theta1, theta2, theta3, k2]
+                % 需要重新映射以匹配粒子状态顺序
+                param_obs = [theta_fit(1), theta_fit(3), theta_fit(2), kc_fit]; % [log_theta1, theta2, theta3, kc]
+                fit_triggered = true;
             else
                 fprintf('  [参数拟合] 拟合未通过约束检查。\n');
             end
         end
 
-        %% 正则化重采样
-        % for i = 1:44
-        %     D(i, m) = sqrt(xparticle_cov(i, i, m));
-        % end
-        outindex = randomr(current_weight);
-        xparticle_curr = xparticle_curr(outindex, :);
-        current_weight = 1/N * ones(N, 1); % 重采样后权重重置
+        % --- [Multi-Weight] 2. 计算各维度似然权重 ---
+        % 2.1 裂纹长度权重 (z)
+        zPred_curr = xparticle_curr(:, 42);
+        for i = 1:N
+            if isnan(zPred_curr(i))
+                multi_weights(i, 1) = 1e-99;
+            else
+                res_z = z(j) - zPred_curr(i);
+                multi_weights(i, 1) = (1/sqrt(2*pi*R)) * exp(-0.5*(res_z^2)/R) + 1e-99;
+            end
+        end
+
+        % 2.2 模型参数权重 (仅在拟合成功时计算)
+        if fit_triggered
+            for d = 2:5
+                obs_val = param_obs(d-1);
+                pred_vals = xparticle_curr(:, 43 + (d-2)); % 43: log_theta1, 44: theta2, 45: theta3, 46: k2
+                for i = 1:N
+                    if isnan(pred_vals(i))
+                        multi_weights(i, d) = 1e-99;
+                    else
+                        res_p = obs_val - pred_vals(i);
+                        % 使用与裂纹长度相同的噪声或独立定义
+                        multi_weights(i, d) = (1/sqrt(2*pi*R)) * exp(-0.5*(res_p^2)/R) + 1e-99;
+                    end
+                end
+            end
+        end
+
+        % --- [Multi-Weight] 3. 可视化似然权重分布 ---
+        if ~exist('param_obs', 'var'), param_obs = []; end
+        xpart_for_plot = [xparticle_curr(:, 42), xparticle_curr(:, 43:46)];
+        plot_multi_weight_distribution(xpart_for_plot, multi_weights, j, t_check(j), z(j), param_obs, TRUE_PARAMS);
+
+        % --- [Multi-Weight] 4. 联合权重重采样 ---
+        resample_opts = struct();
+        resample_opts.weight_mode = 'product';
+        resample_opts.kernel_scale = 0.5;
+        
+        % 注意：重采样需在绘图之后进行
+        xparticle_curr = resample_particles_joint(xparticle_curr, multi_weights, resample_opts);
+        
+        current_weight = 1/N * ones(N, 1);
+
+        % 重采样后重新计算统计量并更新
+        valid_mask_res = ~isnan(xparticle_curr(:, 1));
+        if any(valid_mask_res)
+            Xpf(:, m) = mean(xparticle_curr(valid_mask_res, :))';
+            a_upper(m) = prctile(xparticle_curr(valid_mask_res, 42), 99.9);
+            a_lower(m) = prctile(xparticle_curr(valid_mask_res, 42), 0.1);
+        end
+
+        % --- [新增] 实时绘制裂纹长度图并保存 ---
+        fig_rt = figure('Name', sprintf('Crack Length Realtime - Obs %d', j), 'Visible', 'off', 'Position', [100, 100, 1000, 600], 'Color', 'w');
+        cur_time_axis = (0:m-1) * step / cyclesperhour;
+        plot(t_check(1:j), z(1:j), '^', 'LineWidth', 2, 'MarkerSize', 10, 'MarkerFaceColor', 'k'); hold on;
+        plot(cur_time_axis, Xpf(42, 1:m), 'b', 'LineWidth', 3); hold on;
+        plot(cur_time_axis, a_upper(1:m), 'r--', 'LineWidth', 2); hold on;
+        plot(cur_time_axis, a_lower(1:m), 'r--', 'LineWidth', 2); hold off;
+        xlabel('Flight hours/h', 'FontSize', 12); ylabel('Crack length/mm', 'FontSize', 12);
+        legend('Experimental value', 'Prediction mean', '99.9% bounds', 'Location', 'best');
+        title(sprintf('Crack Growth Real-time Prediction (Obs %d, Time %.2f h)', j, t_check(j)));
+        grid on; set(gca, 'gridlinestyle', ':', 'gridcolor', 'k');
+        
+        save_path_rt = 'MultiWeight_Dist_Results';
+        if ~exist(save_path_rt, 'dir'), mkdir(save_path_rt); end
+        saveas(fig_rt, fullfile(save_path_rt, sprintf('CrackLength_Obs_%d.png', j)));
+        close(fig_rt);
 
         % 重采样后清空粒子坐标历史
         particles_coordinates = cell(1, N);
@@ -639,7 +784,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     %     buffer_weight(:, buffer_step_counter) = current_weight;
 
     % 每隔 SAVE_INTERVAL 步批量保存一次数据，或者在最后一步强制保存
-    if buffer_step_counter >= SAVE_INTERVAL || (m*step/1950.70866 > t_check(end))
+    if buffer_step_counter >= SAVE_INTERVAL || (m*step/cyclesperhour > t_check(end))
         % 计算本次要保存的时间步范围
         start_step = m - buffer_step_counter + 1;
         end_step = m;
@@ -674,7 +819,7 @@ while (m-1)*step/1950.70866 <= t_check(end)
     % 计算当前步的平均裂纹长度（仅用于显示进度）
     mean_z = mean(xparticle_curr(:, 42), 'omitnan');
 
-    disp(['已完成' num2str((m-1)*step/1950.70866) '小时，进行了' num2str(j-1) '次观测', ...
+    disp(['已完成' num2str((m-1)*step/cyclesperhour) '小时，进行了' num2str(j-1) '次观测', ...
         '，当前z均值：' num2str(mean_z, '%.4f'), ...
         '，当前步耗时：' num2str(iter_time, '%.2f') 's', ...
         '，累计总耗时：' num2str(total_time, '%.2f') 's']);
@@ -701,7 +846,7 @@ for i = 1:m-1
     else
         y_1(i) = NaN; y_2(i) = NaN; y_3(i) = NaN;
     end
-    x(i) = (i-1) * step / 1950.70866;
+    x(i) = (i-1) * step / cyclesperhour;
 end
 
 %% 绘制结果 - 裂纹长度图

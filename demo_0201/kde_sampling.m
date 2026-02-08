@@ -92,7 +92,7 @@ function sampled_params = sample_kde_internal(X_trans, h, n_samples)
     % 噪声标准差由带宽 h 控制
     % 简单改进：添加带宽缩减因子 (bandwidth_factor)
     % 值越小，采样点越靠近原始训练数据，分散性越低，避开不合理组合
-    bandwidth_factor = 0.6; 
+    bandwidth_factor = 0.5; 
     noise = randn(n_samples, d) .* (h * bandwidth_factor);
 
     % 3. 得到变换空间的采样点

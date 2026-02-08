@@ -77,9 +77,7 @@ figure;
 plot(1:length(spectra), spectra, '-b');
 hold on;
 % 标记段间界限 (仅示意前100个点或整体)
-xlabel('点序号');
-ylabel('应力幅值');
-title('生成的恒幅应力谱 (无平台连接)');
+title('恒幅应力块谱');
 grid on;
 
 

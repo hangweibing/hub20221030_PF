@@ -61,7 +61,7 @@ end
 all_results = cell(N_starts, 1);
 
 % parfor i = 1:N_starts
-for i = 1:N_starts
+parfor i = 1:N_starts
     p_local = p;
     % Set current starting point
     p_local.PARA0 = all_PARA0(i, :);

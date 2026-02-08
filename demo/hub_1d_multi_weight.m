@@ -206,27 +206,16 @@ end
 current_weight = 1/N * ones(N, 1);
 
 %% ===================================================================
-%% 5. 数据存储初始化 (使用 matfile + 内存缓冲区)
+%% 5. 数据存储初始化 (预分配内存空间)
 %% ===================================================================
-% 存储文件名
-history_file = 'pf_demo_simulation_history.mat';
-if exist(history_file, 'file'), delete(history_file); end
-mfile = matfile(history_file, 'Writable', true);
+% 计算大概需要的总步数，用于预分配空间
+max_hours = t_check(end);
+estimated_steps = ceil(max_hours * cycles_per_hour / step) + 100; 
 
-SAVE_INTERVAL = 100; % 每 100 步保存一次磁盘
-buffer_step_counter = 0;
-
-% 在内存中预分配缓冲区
-buf_Xpf = zeros(5, SAVE_INTERVAL);
-buf_a_upper = zeros(1, SAVE_INTERVAL);
-buf_a_lower = zeros(1, SAVE_INTERVAL);
-buf_POF = zeros(SAVE_INTERVAL, 1);
-
-% 预留最终存储 (用于绘图，根据实际步数增长)
-Xpf = []; 
-a_upper = []; 
-a_lower = []; 
-POF_array = [];
+Xpf = zeros(5, estimated_steps); 
+a_upper = zeros(1, estimated_steps); 
+a_lower = zeros(1, estimated_steps); 
+POF_array = zeros(estimated_steps, 1);
 
 mu_Kc = 33.4;
 std_Kc = 3.34;
@@ -237,12 +226,6 @@ Xpf(:, 1) = mean(xparticle_curr(v_mask, :))';
 a_upper(1) = prctile(xparticle_curr(v_mask, 1), p_up);
 a_lower(1) = prctile(xparticle_curr(v_mask, 1), p_low);
 POF_array(1) = 0;
-
-% 将初始点写入 matfile
-mfile.Xpf(1:size(Xpf,1), 1) = Xpf(:, 1);
-mfile.a_upper(1, 1) = a_upper(1);
-mfile.a_lower(1, 1) = a_lower(1);
-mfile.POF_array(1, 1) = POF_array(1);
 
 %% ===================================================================
 %% 6. 粒子滤波主循环
@@ -344,18 +327,16 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
 
     xparticle_curr = x_next_temp;
 
-    % 记录到缓冲区
-    buffer_step_counter = buffer_step_counter + 1;
-    
+    % --- 记录当前步统计量 (直接写入内存数组) ---
     valid_mask = ~isnan(xparticle_curr(:, 1));
     if any(valid_mask)
         cur_Xpf = mean(xparticle_curr(valid_mask, :))';
         cur_a_up = prctile(xparticle_curr(valid_mask, 1), p_up);
         cur_a_low = prctile(xparticle_curr(valid_mask, 1), p_low);
     else
-        cur_Xpf = Xpf(:, end);
-        cur_a_up = a_upper(end);
-        cur_a_low = a_lower(end);
+        cur_Xpf = Xpf(:, m-1);
+        cur_a_up = a_upper(m-1);
+        cur_a_low = a_lower(m-1);
     end
     
     % 计算失效概率 POF
@@ -372,36 +353,13 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
             fprintf('======================================\n');
         end
     else
-        if ~isempty(POF_array)
-            cur_POF = POF_array(end);
-        else
-            cur_POF = 0;
-        end
+        cur_POF = POF_array(m-1);
     end
     
-    buf_Xpf(:, buffer_step_counter) = cur_Xpf;
-    buf_a_upper(buffer_step_counter) = cur_a_up;
-    buf_a_lower(buffer_step_counter) = cur_a_low;
-    buf_POF(buffer_step_counter) = cur_POF;
-
-    % 每隔 SAVE_INTERVAL 批量写入 matfile
-    if buffer_step_counter >= SAVE_INTERVAL || (m*step/cycles_per_hour > t_check(end))
-        start_idx = m - buffer_step_counter + 1;
-        end_idx = m;
-        
-        mfile.Xpf(1:size(buf_Xpf, 1), start_idx:end_idx) = buf_Xpf(:, 1:buffer_step_counter);
-        mfile.a_upper(1, start_idx:end_idx) = buf_a_upper(1, 1:buffer_step_counter);
-        mfile.a_lower(1, start_idx:end_idx) = buf_a_lower(1, 1:buffer_step_counter);
-        mfile.POF_array(start_idx:end_idx, 1) = buf_POF(1:buffer_step_counter, 1);
-        
-        % 同时将其同步到主内存变量，以便后续绘图 (或者在最后统一读取)
-        Xpf = [Xpf, buf_Xpf(:, 1:buffer_step_counter)];
-        a_upper = [a_upper, buf_a_upper(1:buffer_step_counter)];
-        a_lower = [a_lower, buf_a_lower(1:buffer_step_counter)];
-        POF_array = [POF_array; buf_POF(1:buffer_step_counter)];
-        
-        buffer_step_counter = 0; % 重置缓冲区
-    end
+    Xpf(:, m) = cur_Xpf;
+    a_upper(m) = cur_a_up;
+    a_lower(m) = cur_a_low;
+    POF_array(m) = cur_POF;
 
     %% 观测更新步骤
     if ((m-1)*step/cycles_per_hour < t_check(j)) && (m*step/cycles_per_hour >= t_check(j))
@@ -488,19 +446,31 @@ while (m-1)*step/cycles_per_hour <= t_check(end)
         % 这里的 current_weight 仅作为均值计算的占位，设为 1/N
         current_weight = (1/N) * ones(N, 1);
 
-        % 重采样后重新计算统计量并更新缓冲区（确保绘图连续且包含后验信息）
+        % 重采样后重新计算统计量并更新（确保绘图包含后验信息）
         valid_mask_res = ~isnan(xparticle_curr(:, 1));
         if any(valid_mask_res)
-            % 更新当前步的后验统计量
-            cur_Xpf = mean(xparticle_curr(valid_mask_res, :))';
-            cur_a_up = prctile(xparticle_curr(valid_mask_res, 1), p_up);
-            cur_a_low = prctile(xparticle_curr(valid_mask_res, 1), p_low);
-            
-            % 更新缓冲区中的当前步数据，避免直接索引 a_upper 导致 MATLAB 填充零
-            buf_Xpf(:, buffer_step_counter) = cur_Xpf;
-            buf_a_upper(buffer_step_counter) = cur_a_up;
-            buf_a_lower(buffer_step_counter) = cur_a_low;
+            Xpf(:, m) = mean(xparticle_curr(valid_mask_res, :))';
+            a_upper(m) = prctile(xparticle_curr(valid_mask_res, 1), p_up);
+            a_lower(m) = prctile(xparticle_curr(valid_mask_res, 1), p_low);
         end
+
+        % --- [新增] 实时绘制裂纹长度图并保存 ---
+        fig_rt = figure('Name', sprintf('Crack Length Realtime - Obs %d', j), 'Visible', 'off', 'Position', [100, 100, 1000, 600], 'Color', 'w');
+        cur_time_axis = (0:m-1) * step / cycles_per_hour;
+        plot(t_check(1:j), z(1:j), '^', 'LineWidth', 2, 'MarkerSize', 10, 'MarkerFaceColor', 'k'); hold on;
+        plot(cur_time_axis, Xpf(1, 1:m), 'b', 'LineWidth', 3); hold on;
+        plot(cur_time_axis, a_upper(1:m), 'r--', 'LineWidth', 2); hold on;
+        plot(cur_time_axis, a_lower(1:m), 'r--', 'LineWidth', 2); hold off;
+        xlabel('Flight hours/h', 'FontSize', 12); ylabel('Crack length/mm', 'FontSize', 12);
+        legend('Experimental value', 'Prediction mean', sprintf('%.1f%% bounds', p_up - p_low), 'Location', 'best');
+        title(sprintf('Crack Growth Real-time Prediction (Obs %d, Time %.2f h)', j, t_check(j)));
+        grid on; set(gca, 'gridlinestyle', ':', 'gridcolor', 'k');
+        
+        % 确保保存文件夹存在 (使用与权重分布图一致的文件夹)
+        save_path_rt = 'MultiWeight_Dist_Results';
+        if ~exist(save_path_rt, 'dir'), mkdir(save_path_rt); end
+        saveas(fig_rt, fullfile(save_path_rt, sprintf('CrackLength_Obs_%d.png', j)));
+        close(fig_rt);
 
         j = j + 1;
     end

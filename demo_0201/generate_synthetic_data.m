@@ -21,13 +21,24 @@ rng(SIM_SEED);
 addpath(genpath('For_PF_260127_1'));
 % addpath('../main');
 
+
+
+
 % 试样与几何参数 (同步 hub_1d_simplified.m)
 W = 60;                                     % 试样宽度 (mm)
 B = 5;                                      % 试样厚度 (mm)
-spectrum_factor = 18;                       % 载荷-应力转化系数 (Stress to Force)
+spectrum_factor = 15;                       % 载荷-应力转化系数 (Stress to Force)
 ref_load = 100;                             % 基准载荷 (N)
 cycles_per_hour = 1950.70866;               % 每小时循环次数
-step = 100;                                 % 仿真步长 (cycles)
+step = 1000;                                 % 仿真步长 (cycles)
+
+% 手动选取真实参数行 (注意：1 是标题，2 是第一组数据)
+target_excel_row = 17; 
+
+
+
+
+
 
 % 加载完整载荷谱
 load('AsteixSpectraData_fake.mat', 'spectra');
@@ -48,9 +59,6 @@ T = readtable('AM-TC4-GRO.xlsx');
 params_pool = table2array(T);
 num_data = size(params_pool, 1);
 
-% 手动选取真实参数行 (注意：1 是标题，2 是第一组数据)
-target_excel_row = 27; 
-
 true_params = params_pool(target_excel_row, :);
 log_theta1 = true_params(1);
 theta2 = true_params(2);
@@ -67,7 +75,7 @@ m = 1; % 仿真步数
 N_total_cycles = 0; % 累计循环数
 
 t_full = [0];
-a_full_history = [a0];
+a_full_history = [a0 + normrnd(0, noise_std)];
 
 % 设置输出间隔
 output_interval = 10;
